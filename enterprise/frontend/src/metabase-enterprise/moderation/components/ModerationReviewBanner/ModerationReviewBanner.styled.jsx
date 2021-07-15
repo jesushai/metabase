@@ -3,7 +3,7 @@ import { color } from "metabase/lib/colors";
 import Button from "metabase/components/Button";
 
 export const Container = styled.div`
-  padding: 1rem;
+  padding: 1rem 1rem 1rem 0.5rem;
   background-color: ${props => props.backgroundColor};
   display: flex;
   justify-content: space-between;
@@ -22,10 +22,8 @@ export const Time = styled.time`
   font-size: 12px;
 `;
 
-export const IconButton = styled(Button).attrs({
-  iconOnly: true,
-})`
-  padding: 0 !important;
+export const IconButton = styled(Button)`
+  padding: 0 0.5rem !important;
   border: none;
   background-color: transparent;
 

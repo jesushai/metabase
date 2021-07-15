@@ -22,7 +22,6 @@ export const Label = styled.h5`
 
 export const VerifyButton = styled(Button).attrs({
   icon: verifiedIcon,
-  iconOnly: true,
   size: 20,
 })`
   border: none;
@@ -30,5 +29,9 @@ export const VerifyButton = styled(Button).attrs({
   &:hover {
     background-color: transparent;
     color: ${color(verifiedIconColor)};
+  }
+
+  &:disabled {
+    color: ${color("text-medium")};
   }
 `;
