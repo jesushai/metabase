@@ -6,7 +6,7 @@
             [clojure.tools.logging :as log]
             [medley.core :as m]
             [metabase-enterprise.serialization.names :as names :refer [fully-qualified-name->context]]
-            [metabase-enterprise.serialization.upsert :refer [maybe-fixup-card-template-ids! maybe-upsert-many!]]
+            [metabase-enterprise.serialization.upsert :refer [maybe-upsert-many!]]
             [metabase.config :as config]
             [metabase.mbql.normalize :as mbql.normalize]
             [metabase.mbql.util :as mbql.util]
@@ -28,7 +28,7 @@
             [metabase.models.segment :refer [Segment]]
             [metabase.models.setting :as setting]
             [metabase.models.table :refer [Table]]
-            [metabase.models.user :refer [User]]
+            [metabase.models.user :as user :refer [User]]
             [metabase.shared.models.visualization-settings :as mb.viz]
             [metabase.util :as u]
             [metabase.util.date-2 :as u.date]
@@ -36,7 +36,8 @@
             [toucan.db :as db]
             [yaml.core :as yaml]
             [yaml.reader :as y.reader])
-  (:import java.time.temporal.Temporal))
+  (:import java.time.temporal.Temporal
+           java.util.UUID))
 
 (extend-type Temporal y.reader/YAMLReader
   (decode [data]
@@ -135,8 +136,16 @@
   necessary when dealing with the full MBQL query tree (which can have arbitrary nesting of maps and
   vectors)."
   [m]
-  (reduce (fn [acc ks]
-            (pull-unresolved-names-up acc (drop-last ks))) m (paths-to-key-in m ::unresolved-names)))
+  (let [paths (paths-to-key-in m ::unresolved-names)]
+    (if-not (empty? paths)
+      (reduce (fn [acc ks]
+                (let [ks* (drop-last ks)]
+                  (if-not (empty? ks*)
+                    (pull-unresolved-names-up acc ks*)
+                    acc)))
+              m
+              paths)
+      m)))
 
 (defn- mbql-fully-qualified-names->ids*
   [entity]
@@ -185,8 +194,8 @@
    (unresolved-names->string entity nil))
   ([entity insert-id]
    (str
-    (if-let [nm (:name entity)] (str "\"" nm "\""))
-    (if insert-id (format " (inserted as ID %d) " insert-id))
+    (when-let [nm (:name entity)] (str "\"" nm "\""))
+    (when insert-id (format " (inserted as ID %d) " insert-id))
     "missing:\n  "
     (str/join
      "\n  "
@@ -338,17 +347,17 @@
   (-> (if-let [link-type (::mb.viz/link-type click-behavior)]
         (case link-type
           ::mb.viz/card (let [card-id (::mb.viz/link-target-id click-behavior)]
-                          (if (string? card-id)
+                          (when (string? card-id)
                             (update-existing-in-capture-missing
                              click-behavior
                              [::mb.viz/link-target-id]
                              (comp :card fully-qualified-name->context))))
           ::mb.viz/dashboard (let [dashboard-id (::mb.viz/link-target-id click-behavior)]
-                              (if (string? dashboard-id)
-                                (update-existing-in-capture-missing
-                                 click-behavior
-                                 [::mb.viz/link-target-id]
-                                 (comp :dashboard fully-qualified-name->context))))
+                               (when (string? dashboard-id)
+                                 (update-existing-in-capture-missing
+                                  click-behavior
+                                  [::mb.viz/link-target-id]
+                                  (comp :dashboard fully-qualified-name->context))))
           click-behavior)
         click-behavior)
       (m/update-existing ::mb.viz/parameter-mapping resolve-click-behavior-parameter-mapping)))
@@ -376,18 +385,46 @@
       (pull-unresolved-names-up vs-norm [::mb.viz/click-behavior] resolved-cb))
     vs-norm))
 
-(defn- resolve-column-settings [vs-norm]
+(defn- resolve-column-settings
+  "Resolve the entries in a :column_settings map (which is under a :visualization_settings map). These map entries
+  may contain fully qualified field names, or even other cards. In case of an unresolved name (i.e. a card that hasn't
+  yet been loaded), we will track it under ::unresolved-names and revisit on the next pass."
+  [vs-norm]
   (if-let [col-settings (::mb.viz/column-settings vs-norm)]
     (let [resolved-cs (reduce-kv accumulate-converted-column-settings {} col-settings)]
       (pull-unresolved-names-up vs-norm [::mb.viz/column-settings] resolved-cs))
     vs-norm))
 
+(defn- resolve-table-columns
+  "Resolve the :table.columns key from a :visualization_settings map, which may contain fully qualified field names.
+  Such fully qualified names will be converted to the numeric field ID before being filled into the loaded card. Only
+  other field names (not cards, or other collection based entity types) should be referenced here, so there is no need
+  to detect or track ::unresolved-names."
+  [vs-norm]
+  (if (::mb.viz/table-columns vs-norm)
+    (letfn [(resolve-table-column-field-ref [[f-type f-str f-md]]
+              (if (names/fully-qualified-field-name? f-str)
+                [f-type ((comp :field fully-qualified-name->context) f-str) f-md]
+                [f-type f-str f-md]))
+            (resolve-field-id [{:keys [::mb.viz/table-column-field-ref] :as tbl-col}]
+              (update tbl-col ::mb.viz/table-column-field-ref resolve-table-column-field-ref))]
+      (update vs-norm ::mb.viz/table-columns (fn [tbl-cols]
+                                               (mapv resolve-field-id tbl-cols))))
+    vs-norm))
+
 (defn- resolve-visualization-settings
+  "Resolve all references from a :visualization_settings map, the various submaps of which may contain:
+    - fully qualified field names
+    - fully qualified card or dashboard names
+
+  Any unresolved entities from this resolution process will be tracked via ::unresolved-named so that the card or
+  dashboard card holding these visualization settings can be revisited in a future pass."
   [entity]
   (if-let [viz-settings (:visualization_settings entity)]
     (let [resolved-vs (-> (mb.viz/db->norm viz-settings)
                           resolve-top-level-click-behavior
                           resolve-column-settings
+                          resolve-table-columns
                           mb.viz/norm->db)]
       (pull-unresolved-names-up entity [:visualization_settings] resolved-vs))
     entity))
@@ -397,11 +434,11 @@
   {:added "0.40.0"}
   [context dashboards]
   (let [dashboard-ids   (maybe-upsert-many! context Dashboard
-                          (for [dashboard dashboards]
-                            (-> dashboard
-                                (dissoc :dashboard_cards)
-                                (assoc :collection_id (:collection context)
-                                       :creator_id    @default-user))))
+                                            (for [dashboard dashboards]
+                                              (-> dashboard
+                                                  (dissoc :dashboard_cards)
+                                                  (assoc :collection_id (:collection context)
+                                                         :creator_id    @default-user))))
         dashboard-cards (map :dashboard_cards dashboards)
         ;; a function that prepares a dash card for insertion, while also validating to ensure the underlying
         ;; card_id could be resolved from the fully qualified name
@@ -418,12 +455,12 @@
                               (let [add-keys         [:dashboard_cards card-idx :visualization_settings]
                                     fixed-names      (m/map-vals #(concat add-keys %) unresolved)
                                     with-fixed-names (assoc with-viz ::unresolved-names fixed-names)]
-                               (-> acc
-                                   (update ::revisit (fn [revisit-map]
-                                                       (update revisit-map dash-idx #(cons with-fixed-names %))))
-                                   ;; index means something different here than in the Card case (it's actually the index
-                                   ;; of the dashboard)
-                                   (update ::revisit-index #(conj % dash-idx))))
+                                (-> acc
+                                    (update ::revisit (fn [revisit-map]
+                                                        (update revisit-map dash-idx #(cons with-fixed-names %))))
+                                    ;; index means something different here than in the Card case (it's actually the index
+                                    ;; of the dashboard)
+                                    (update ::revisit-index #(conj % dash-idx))))
                               (update acc ::process #(conj % with-viz)))))
         prep-init-acc   {::process [] ::revisit-index #{} ::revisit {}}
         filtered-cards  (reduce-kv
@@ -439,14 +476,14 @@
         dashcard-ids    (maybe-upsert-many! context DashboardCard (map #(dissoc % :series) proceed-cards))
         series-pairs    (map vector (map :series proceed-cards) dashcard-ids)]
     (maybe-upsert-many! context DashboardCardSeries
-      (for [[series dashboard-card-id] series-pairs
-            dashboard-card-series      series
-            :when (and dashboard-card-series dashboard-card-id)]
-        (-> dashboard-card-series
-            (assoc :dashboardcard_id dashboard-card-id)
-            (update :card_id fully-qualified-name->card-id))))
+                        (for [[series dashboard-card-id] series-pairs
+                              dashboard-card-series      series
+                              :when (and dashboard-card-series dashboard-card-id)]
+                          (-> dashboard-card-series
+                              (assoc :dashboardcard_id dashboard-card-id)
+                              (update :card_id fully-qualified-name->card-id))))
     (let [revisit-dashboards (map (partial nth dashboards) revisit-indexes)]
-      (if-not (empty? revisit-dashboards)
+      (when (seq revisit-dashboards)
         (let [revisit-map    (::revisit filtered-cards)
               revisit-inf-fn (fn [[dash-idx dashcards]]
                                (format
@@ -462,7 +499,7 @@
              "Retrying dashboards for collection %s: %s"
              (or (:collection context) "root")
              (str/join ", " (map :name revisit-dashboards)))
-            (load-dashboards context revisit-dashboards)))))))
+            (load-dashboards (assoc context :mode :update) revisit-dashboards)))))))
 
 (defmethod load "dashboards"
   [path context]
@@ -496,7 +533,7 @@
             channel             channels
             :when pulse-id]
         (assoc channel :pulse_id pulse-id)))
-    (if-not (empty? revisit)
+    (when (seq revisit)
       (let [revisit-info-map (group-by ::pulse-name revisit)]
         (log/infof "Unresolved references for pulses in collection %s; will reload after first pass complete:%n%s%n"
                    (or (:collection context) "root")
@@ -509,7 +546,7 @@
         (fn []
           (log/infof "Reloading pulses from collection %d" (:collection context))
           (let [pulse-indexes (map ::pulse-index revisit)]
-            (load-pulses (map (partial nth pulses) pulse-indexes) context)))))))
+            (load-pulses (map (partial nth pulses) pulse-indexes) (assoc context :mode :update))))))))
 
 (defmethod load "pulses"
   [path context]
@@ -603,17 +640,9 @@
                             {::revisit [] ::revisit-index #{} ::process []}
                             (vec resolved-cards))
         dummy-insert-cards (not-empty (::revisit grouped-cards))
-        process-cards      (::process grouped-cards)
-        touched-card-ids   (maybe-upsert-many!
-                            context Card
-                            process-cards)]
-    (maybe-fixup-card-template-ids!
-     (assoc context :mode :update)
-     Card
-     (for [card (slurp-many paths)] (resolve-card card (assoc context :mode :update)))
-     touched-card-ids)
-
-    (if dummy-insert-cards
+        process-cards      (::process grouped-cards)]
+    (maybe-upsert-many! context Card process-cards)
+    (when dummy-insert-cards
       (let [dummy-inserted-ids (maybe-upsert-many!
                                 context
                                 Card
@@ -628,17 +657,46 @@
         (fn []
           (log/infof "Attempting to reload cards in collection %d" (:collection context))
           (let [revisit-indexes (::revisit-index grouped-cards)]
-            (load-cards context paths (mapv (partial nth cards) revisit-indexes))))))))
+            (load-cards (assoc context :mode :update) paths (mapv (partial nth cards) revisit-indexes))))))))
 
 (defmethod load "cards"
   [path context]
   (binding [names/*suppress-log-name-lookup-exception* true]
     (load-cards context (list-dirs path) nil)))
 
+(defn- pre-insert-user
+  "A function called on each User instance before it is inserted (via upsert)."
+  [user]
+  (log/infof "User with email %s is new to target DB; setting a random password" (:email user))
+  (assoc user :password (str (UUID/randomUUID))))
+
+;; leaving comment out for now (deliberately), because this will send a password reset email to newly inserted users
+;; when enabled in a future release; see `defmethod load "users"` below
+#_(defn- post-insert-user
+    "A function called on the ID of each `User` instance after it is inserted (via upsert)."
+    [user-id]
+    (when-let [{email :email, google-auth? :google_auth, is-active? :is_active}
+               (db/select-one [User :email :google_auth :is_active] :id user-id)]
+      (let [reset-token        (user/set-password-reset-token! user-id)
+            site-url           (public-settings/site-url)
+            password-reset-url (str site-url "/auth/reset_password/" reset-token)
+            ;; in a web server context, the server-name ultimately comes from ServletRequest/getServerName
+            ;; (i.e. the Java class, via Ring); this is the closest approximation in our batch context
+            server-name        (.getHost (URL. site-url))]
+        (let [email-res (email/send-password-reset-email! email google-auth? server-name password-reset-url is-active?)]
+          (if (:error email-res)
+            (log/infof "Failed to send password reset email generated for user ID %d (%s): %s"
+                       user-id
+                       email
+                       (:message email-res))
+            (log/infof "Password reset email generated for user ID %d (%s)" user-id email)))
+        user-id)))
+
 (defmethod load "users"
   [path context]
   ;; Currently we only serialize the new owner user, so it's fine to ignore mode setting
-  (maybe-upsert-many! context User
+  ;; add :post-insert-fn post-insert-user back to start sending password reset emails
+  (maybe-upsert-many! (assoc context :pre-insert-fn pre-insert-user) User
     (for [user (slurp-dir path)]
       (dissoc user :password))))
 
@@ -650,7 +708,7 @@
 
 (defn- make-reload-fn [all-results]
   (let [all-fns (filter fn? all-results)]
-    (if-not (empty? all-fns)
+    (when (seq all-fns)
       (let [new-fns (doall all-fns)]
         (fn []
           (make-reload-fn (for [reload-fn new-fns]

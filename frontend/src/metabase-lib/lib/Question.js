@@ -1,5 +1,5 @@
 import _ from "underscore";
-import { chain, assoc, dissoc, assocIn } from "icepick";
+import { assoc, assocIn, chain, dissoc, getIn } from "icepick";
 
 // NOTE: the order of these matters due to circular dependency issues
 import StructuredQuery, {
@@ -28,28 +28,28 @@ import { isStandard } from "metabase/lib/query/filter";
 import { memoize, sortObject } from "metabase-lib/lib/utils";
 
 // TODO: remove these dependencies
-import * as Card_DEPRECATED from "metabase/lib/card";
 import * as Urls from "metabase/lib/urls";
 import {
-  findColumnSettingIndexForColumn,
   findColumnIndexForColumnSetting,
+  findColumnSettingIndexForColumn,
   syncTableColumnsToQuery,
 } from "metabase/lib/dataset";
-import { getParametersWithExtras, isTransientId } from "metabase/meta/Card";
 import {
-  parameterToMBQLFilter,
-  normalizeParameterValue,
-} from "metabase/meta/Parameter";
+  getValueAndFieldIdPopulatedParametersFromCard,
+  isTransientId,
+} from "metabase/meta/Card";
+import { parameterToMBQLFilter } from "metabase/parameters/utils/mbql";
+import { normalizeParameterValue } from "metabase/parameters/utils/parameter-values";
 import {
   aggregate,
   breakout,
+  distribution,
+  drillUnderlyingRecords,
   filter,
   pivot,
-  distribution,
   toUnderlyingRecords,
-  drillUnderlyingRecords,
 } from "metabase/modes/lib/actions";
-import { MetabaseApi, CardApi, maybeUsePivotEndpoint } from "metabase/services";
+import { CardApi, maybeUsePivotEndpoint, MetabaseApi } from "metabase/services";
 import Questions from "metabase/entities/questions";
 
 import type {
@@ -57,8 +57,8 @@ import type {
   ParameterValues,
 } from "metabase-types/types/Parameter";
 import type {
-  DatasetQuery,
   Card as CardObject,
+  DatasetQuery,
   VisualizationSettings,
 } from "metabase-types/types/Card";
 import type { Dataset, Value } from "metabase-types/types/Dataset";
@@ -71,6 +71,7 @@ import {
   ALERT_TYPE_ROWS,
   ALERT_TYPE_TIMESERIES_GOAL,
 } from "metabase-lib/lib/Alert";
+import { utf8_to_b64url } from "metabase/lib/encoding";
 
 type QuestionUpdateFn = (q: Question) => ?Promise<void>;
 
@@ -301,10 +302,16 @@ export default class Question {
     return this._card && this._card.displayIsLocked;
   }
 
-  // If we're locked to a display that is no longer "sensible", unlock it.
-  maybeUnlockDisplay(sensibleDisplays): Question {
-    const locked =
-      this.displayIsLocked() && sensibleDisplays.includes(this.display());
+  // If we're locked to a display that is no longer "sensible", unlock it
+  // unless it was locked in unsensible
+  maybeUnlockDisplay(sensibleDisplays, previousSensibleDisplays): Question {
+    const wasSensible =
+      previousSensibleDisplays == null ||
+      previousSensibleDisplays.includes(this.display());
+    const isSensible = sensibleDisplays.includes(this.display());
+
+    const shouldUnlock = wasSensible && !isSensible;
+    const locked = this.displayIsLocked() && !shouldUnlock;
     return this.setDisplayIsLocked(locked);
   }
 
@@ -535,13 +542,38 @@ export default class Question {
 
   drillPK(field: Field, value: Value): ?Question {
     const query = this.query();
-    if (query instanceof StructuredQuery) {
-      return query
-        .reset()
-        .setTable(field.table)
-        .filter(["=", ["field", field.id, null], value])
-        .question();
+
+    if (!(query instanceof StructuredQuery)) {
+      return;
     }
+
+    const otherPKFilters = query
+      .filters()
+      ?.filter(filter => {
+        const filterField = filter?.field();
+        if (!filterField) {
+          return false;
+        }
+
+        const isNotSameField = filterField.id !== field.id;
+        const isPKEqualsFilter =
+          filterField.isPK() && filter.operatorName() === "=";
+        const isFromSameTable = filterField.table.id === field.table.id;
+
+        return isPKEqualsFilter && isNotSameField && isFromSameTable;
+      })
+      .map(filter => filter.raw());
+
+    const filtersToApply = [
+      ["=", ["field", field.id, null], value],
+      ...otherPKFilters,
+    ];
+
+    const resultedQuery = filtersToApply.reduce((query, filter) => {
+      return query.addFilter(filter);
+    }, query.reset().setTable(field.table));
+
+    return resultedQuery.question();
   }
 
   _syncStructuredQueryColumnsAndSettings(previousQuestion, previousQuery) {
@@ -624,8 +656,11 @@ export default class Question {
 
     const validVizSettings = vizSettings.filter(colSetting => {
       const hasColumn = findColumnIndexForColumnSetting(cols, colSetting) >= 0;
-      return hasColumn;
+      const isMutatingColumn =
+        findColumnIndexForColumnSetting(addedColumns, colSetting) >= 0;
+      return hasColumn && !isMutatingColumn;
     });
+
     const noColumnsRemoved = validVizSettings.length === vizSettings.length;
 
     if (noColumnsRemoved && addedColumns.length === 0) {
@@ -700,6 +735,11 @@ export default class Question {
     return Mode.forQuestion(this);
   }
 
+  /**
+   * Returns true if, based on filters and table columns, the expected result is a single row.
+   * However, it might not be true when a PK column is not unique, leading to multiple rows.
+   * Because of that, always check query results in addition to this property.
+   */
   isObjectDetail(): boolean {
     const mode = this.mode();
     return mode ? mode.name() === "object" : false;
@@ -782,16 +822,22 @@ export default class Question {
     originalQuestion,
     clean = true,
     query,
+    includeDisplayIsLocked,
   }: {
     originalQuestion?: Question,
     clean?: boolean,
     query?: { [string]: any },
+    includeDisplayIsLocked?: boolean,
   } = {}): string {
     if (
       !this.id() ||
       (originalQuestion && this.isDirtyComparedTo(originalQuestion))
     ) {
-      return Urls.question(null, this._serializeForUrl({ clean }), query);
+      return Urls.question(
+        null,
+        this._serializeForUrl({ clean, includeDisplayIsLocked }),
+        query,
+      );
     } else {
       return Urls.question(this.card(), "", query);
     }
@@ -801,15 +847,13 @@ export default class Question {
     let cellQuery = "";
     if (filters.length > 0) {
       const mbqlFilter = filters.length > 1 ? ["and", ...filters] : filters[0];
-      cellQuery = `/cell/${Card_DEPRECATED.utf8_to_b64url(
-        JSON.stringify(mbqlFilter),
-      )}`;
+      cellQuery = `/cell/${utf8_to_b64url(JSON.stringify(mbqlFilter))}`;
     }
     const questionId = this.id();
     if (questionId != null && !isTransientId(questionId)) {
       return `/auto/dashboard/question/${questionId}${cellQuery}`;
     } else {
-      const adHocQuery = Card_DEPRECATED.utf8_to_b64url(
+      const adHocQuery = utf8_to_b64url(
         JSON.stringify(this.card().dataset_query),
       );
       return `/auto/dashboard/adhoc/${adHocQuery}${cellQuery}`;
@@ -820,9 +864,7 @@ export default class Question {
     let cellQuery = "";
     if (filters.length > 0) {
       const mbqlFilter = filters.length > 1 ? ["and", ...filters] : filters[0];
-      cellQuery = `/cell/${Card_DEPRECATED.utf8_to_b64url(
-        JSON.stringify(mbqlFilter),
-      )}`;
+      cellQuery = `/cell/${utf8_to_b64url(JSON.stringify(mbqlFilter))}`;
     }
     const questionId = this.id();
     const query = this.query();
@@ -832,7 +874,7 @@ export default class Question {
         if (questionId != null && !isTransientId(questionId)) {
           return `/auto/dashboard/question/${questionId}${cellQuery}/compare/table/${tableId}`;
         } else {
-          const adHocQuery = Card_DEPRECATED.utf8_to_b64url(
+          const adHocQuery = utf8_to_b64url(
             JSON.stringify(this.card().dataset_query),
           );
           return `/auto/dashboard/adhoc/${adHocQuery}${cellQuery}/compare/table/${tableId}`;
@@ -850,6 +892,10 @@ export default class Question {
       result_metadata: metadataColumns,
       metadata_checksum: metadataChecksum,
     });
+  }
+
+  getResultMetadata() {
+    return this.card().result_metadata ?? [];
   }
 
   /**
@@ -966,7 +1012,11 @@ export default class Question {
 
   // TODO: Fix incorrect Flow signature
   parameters(): ParameterObject[] {
-    return getParametersWithExtras(this.card(), this._parameterValues);
+    return getValueAndFieldIdPopulatedParametersFromCard(
+      this.card(),
+      this.metadata(),
+      this._parameterValues,
+    );
   }
 
   parametersList(): ParameterObject[] {
@@ -1000,7 +1050,11 @@ export default class Question {
   }
 
   // Internal methods
-  _serializeForUrl({ includeOriginalCardId = true, clean = true } = {}) {
+  _serializeForUrl({
+    includeOriginalCardId = true,
+    clean = true,
+    includeDisplayIsLocked = false,
+  } = {}) {
     const query = clean ? this.query().clean() : this.query();
 
     const cardCopy = {
@@ -1016,9 +1070,14 @@ export default class Question {
       ...(includeOriginalCardId
         ? { original_card_id: this._card.original_card_id }
         : {}),
+      ...(includeDisplayIsLocked
+        ? {
+            displayIsLocked: this._card.displayIsLocked,
+          }
+        : {}),
     };
 
-    return Card_DEPRECATED.utf8_to_b64url(JSON.stringify(sortObject(cardCopy)));
+    return utf8_to_b64url(JSON.stringify(sortObject(cardCopy)));
   }
 
   convertParametersToFilters() {
@@ -1036,11 +1095,17 @@ export default class Question {
   }
 
   getUrlWithParameters() {
-    const question = this.query().isEditable()
-      ? this.convertParametersToFilters()
-      : this.markDirty(); // forces use of serialized question url
+    const question = this.convertParametersToFilters().markDirty();
     const query = this.isNative() ? this._parameterValues : undefined;
-    return question.getUrl({ originalQuestion: this, query });
+    return question.getUrl({
+      originalQuestion: this,
+      query,
+      includeDisplayIsLocked: true,
+    });
+  }
+
+  getModerationReviews() {
+    return getIn(this, ["_card", "moderation_reviews"]) || [];
   }
 }
 

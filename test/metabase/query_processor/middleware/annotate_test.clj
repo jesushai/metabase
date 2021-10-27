@@ -1,7 +1,7 @@
 (ns metabase.query-processor.middleware.annotate-test
   (:require [clojure.test :refer :all]
             [metabase.driver :as driver]
-            [metabase.models :refer [Field]]
+            [metabase.models :refer [Card Field]]
             [metabase.query-processor :as qp]
             [metabase.query-processor.middleware.annotate :as annotate]
             [metabase.query-processor.store :as qp.store]
@@ -416,6 +416,7 @@
       (is (= {:cols [{:name         "metric"
                       :display_name "Total Events"
                       :base_type    :type/Text
+                      :effective_type :type/Text
                       :source       :aggregation
                       :field_ref    [:aggregation 0]}]}
              (add-column-info
@@ -486,6 +487,7 @@
   (testing "Make sure `:cols` always come back with a unique `:name` key (#8759)"
     (is (= {:cols
             [{:base_type     :type/Number
+              :effective_type :type/Number
               :semantic_type :type/Quantity
               :name          "count"
               :display_name  "count"
@@ -495,14 +497,17 @@
               :name         "sum"
               :display_name "sum"
               :base_type    :type/Number
+              :effective_type :type/Number
               :field_ref    [:aggregation 1]}
              {:base_type     :type/Number
+              :effective_type :type/Number
               :semantic_type :type/Quantity
               :name          "count_2"
               :display_name  "count"
               :source        :aggregation
               :field_ref     [:aggregation 2]}
              {:base_type     :type/Number
+              :effective_type :type/Number
               :semantic_type :type/Quantity
               :name          "count_3"
               :display_name  "count_2"
@@ -607,3 +612,31 @@
                               :id           %ean
                               :field_ref    &Products.ean})
                            (ean-metadata (add-column-info nested-query {}))))))))))))))
+
+;; metabase#14787
+(deftest col-info-for-fields-from-card-test
+  (mt/dataset sample-dataset
+    (let [card-1-query (mt/mbql-query orders
+                         {:joins [{:fields       :all
+                                   :source-table $$products
+                                   :condition    [:= $product_id &Products.products.id]
+                                   :alias        "Products"}]})]
+      (mt/with-temp* [Card [{card-1-id :id} {:dataset_query card-1-query}]
+                      Card [{card-2-id :id} {:dataset_query (mt/mbql-query people)}]]
+        (testing "when a nested query is from a saved question, there should be no `:join-alias` on the left side"
+          (mt/$ids nil
+            (let [base-query (qp/query->preprocessed
+                              (mt/mbql-query nil
+                                {:source-table (str "card__" card-1-id)
+                                 :joins        [{:fields       :all
+                                                 :source-table (str "card__" card-2-id)
+                                                 :condition    [:= $orders.user_id &Products.products.id]
+                                                 :alias        "Q"}]
+                                 :limit        1}))
+                  fields     #{%orders.discount %products.title %people.source}]
+              (is (= [{:display_name "Discount" :field_ref [:field %orders.discount nil]}
+                      {:display_name "Products → Title" :field_ref [:field %products.title nil]}
+                      {:display_name "Q → Source" :field_ref [:field %people.source {:join-alias "Q"}]}]
+                     (->> (:cols (add-column-info base-query {}))
+                          (filter #(fields (:id %)))
+                          (map #(select-keys % [:display_name :field_ref]))))))))))))

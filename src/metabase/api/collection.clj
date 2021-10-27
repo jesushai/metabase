@@ -87,7 +87,7 @@
 (def ^:private valid-model-param-values
   "Valid values for the `?model=` param accepted by endpoints in this namespace.
   `no_models` is for nilling out the set because a nil model set is actually the total model set"
-  #{"card" "collection" "dashboard" "pulse" "snippet" "no_models"})
+  #{"card" "dataset" "collection" "dashboard" "pulse" "snippet" "no_models"})
 
 (def ^:private ModelString
   (apply s/enum valid-model-param-values))
@@ -167,7 +167,7 @@
 (defmethod post-process-collection-children :pulse
   [_ rows]
   (for [row rows]
-    (dissoc row :description :display)))
+    (dissoc row :description :display :authority_level :moderated_status)))
 
 (defmethod collection-children-query :snippet
   [_ collection {:keys [archived? pinned-state]}]
@@ -180,14 +180,25 @@
 (defmethod post-process-collection-children :snippet
   [_ rows]
   (for [row rows]
-    (dissoc row :description :collection_position :display)))
+    (dissoc row :description :collection_position :display :authority_level :moderated_status)))
 
-(defmethod collection-children-query :card
-  [_ collection {:keys [archived? pinned-state]}]
-  (-> {:select    [:c.id :c.name :c.description :c.collection_position :c.display [(hx/literal "card") :model]
+(defn- card-query [dataset? collection {:keys [archived? pinned-state]}]
+  (-> {:select    [:c.id :c.name :c.description :c.collection_position :c.display
+                   [(hx/literal (if dataset? "dataset" "card")) :model]
                    [:u.id :last_edit_user] [:u.email :last_edit_email]
                    [:u.first_name :last_edit_first_name] [:u.last_name :last_edit_last_name]
-                   [:r.timestamp :last_edit_timestamp]]
+                   [:r.timestamp :last_edit_timestamp]
+                   [{:select [:status]
+                     :from [:moderation_review]
+                     :where [:and
+                             [:= :moderated_item_type "card"]
+                             [:= :moderated_item_id :c.id]
+                             [:= :most_recent true]]
+                     ;; limit 1 to ensure that there is only one result but this invariant should hold true, just
+                     ;; protecting against potential bugs
+                     :order-by [[:id :desc]]
+                     :limit 1}
+                    :moderated_status]]
        :from      [[Card :c]]
        ;; todo: should there be a flag, or a realized view?
        :left-join [[{:select [:r1.*]
@@ -203,12 +214,25 @@
                    [:core_user :u] [:= :u.id :r.user_id]]
        :where     [:and
                    [:= :collection_id (:id collection)]
-                   [:= :archived (boolean archived?)]]}
+                   [:= :archived (boolean archived?)]
+                   [:= :dataset dataset?]]}
       (h/merge-where (pinned-state->clause pinned-state))))
+
+(defmethod collection-children-query :dataset
+  [_ collection options]
+  (card-query true collection options))
+
+(defmethod post-process-collection-children :dataset
+  [_ rows]
+  (post-process-collection-children :card rows))
+
+(defmethod collection-children-query :card
+  [_ collection options]
+  (card-query false collection options))
 
 (defmethod post-process-collection-children :card
   [_ rows]
-  (hydrate rows :favorite))
+  (hydrate (map #(dissoc % :authority_level) rows) :favorite))
 
 (defmethod collection-children-query :dashboard
   [_ collection {:keys [archived? pinned-state]}]
@@ -235,7 +259,7 @@
 
 (defmethod post-process-collection-children :dashboard
   [_ rows]
-  (hydrate (map #(dissoc % :display) rows) :favorite))
+  (hydrate (map #(dissoc % :display :authority_level :moderated_status) rows) :favorite))
 
 (defmethod collection-children-query :collection
   [_ collection {:keys [archived? collection-namespace pinned-state]}]
@@ -248,7 +272,8 @@
              :select [:id
                       :name
                       :description
-                      [(hx/literal "collection") :model]])
+                      [(hx/literal "collection") :model]
+                      :authority_level])
       ;; the nil indicates that collections are never pinned.
       (h/merge-where (pinned-state->clause pinned-state nil))))
 
@@ -259,7 +284,7 @@
     ;; don't get models back from ulterior over-query
     ;; Previous examination with logging to DB says that there's no N+1 query for this.
     ;; However, this was only tested on H2 and Postgres
-    (assoc (dissoc row :collection_position :display)
+    (assoc (dissoc row :collection_position :display :moderated_status)
            :can_write
            (mi/can-write? Collection (:id row)))))
 
@@ -297,6 +322,7 @@
   (case (keyword model-name)
     :collection Collection
     :card       Card
+    :dataset    Card
     :dashboard  Dashboard
     :pulse      Pulse
     :snippet    NativeQuerySnippet))
@@ -317,8 +343,8 @@
   "All columns that need to be present for the union-all. Generated with the comment form below. Non-text columns that
   are optional (not id, but last_edit_user for example) must have a type so that the union-all can unify the nil with
   the correct column type."
-  [:id :name :description :display :model :collection_position
-   :last_edit_email :last_edit_first_name :last_edit_last_name
+  [:id :name :description :display :model :collection_position :authority_level
+   :last_edit_email :last_edit_first_name :last_edit_last_name :moderated_status
    [:last_edit_user :integer] [:last_edit_timestamp :timestamp]])
 
 (defn- add-missing-columns
@@ -336,9 +362,10 @@
   [select-clause model]
   (let [rankings {:dashboard  1
                   :pulse      2
-                  :card       3
-                  :snippet    4
-                  :collection 5}]
+                  :dataset    3
+                  :card       4
+                  :snippet    5
+                  :collection 6}]
     (conj select-clause [(get rankings model 100)
                          :model_ranking])))
 
@@ -409,7 +436,10 @@
                      :order-by sql-order}
         ;; We didn't implement collection pagination for snippets namespace for root/items
         ;; Rip out the limit for now and put it back in when we want it
-        limit-query (if (= (:collection-namespace options) "snippets")
+        limit-query (if (or
+                          (nil? offset-paging/*limit*)
+                          (nil? offset-paging/*offset*)
+                          (= (:collection-namespace options) "snippets"))
                       rows-query
                       (assoc rows-query
                              :limit  offset-paging/*limit*
@@ -428,7 +458,7 @@
   "Fetch a sequence of 'child' objects belonging to a Collection, filtered using `options`."
   [{collection-namespace :namespace, :as collection}            :- collection/CollectionWithLocationAndIDOrRoot
    {:keys [models collections-only? pinned-state], :as options} :- CollectionChildrenOptions]
-  (let [valid-models (for [model-kw [:collection :card :dashboard :pulse :snippet]
+  (let [valid-models (for [model-kw [:collection :dataset :card :dashboard :pulse :snippet]
                            ;; only fetch models that are specified by the `model` param; or everything if it's empty
                            :when    (or (empty? models) (contains? models model-kw))
                            :let     [toucan-model       (model-name->toucan-model model-kw)
@@ -566,6 +596,7 @@
      {:name        name
       :color       color
       :description description
+      :authority_level authority_level
       :namespace   namespace}
      (when parent_id
        {:location (collection/children-location (db/select-one [Collection :location :id] :id parent_id))}))))
@@ -613,9 +644,9 @@
   users just as if they had be archived individually via the card API."
   [collection-before-update collection-updates]
   (when (api/column-will-change? :archived collection-before-update collection-updates)
-    (when-let [alerts (seq (apply pulse/retrieve-alerts-for-cards (db/select-ids Card
-                                                                    :collection_id (u/the-id collection-before-update))))]
-        (card-api/delete-alert-and-notify-archived! alerts))))
+    (when-let [alerts (seq (pulse/retrieve-alerts-for-cards
+                            {:card-ids (db/select-ids Card :collection_id (u/the-id collection-before-update))}))]
+      (card-api/delete-alert-and-notify-archived! alerts))))
 
 (api/defendpoint PUT "/:id"
   "Modify an existing Collection, including archiving or unarchiving it, or moving it."

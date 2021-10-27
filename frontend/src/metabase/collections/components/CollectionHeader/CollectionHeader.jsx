@@ -11,24 +11,27 @@ import PageHeading from "metabase/components/type/PageHeading";
 import Tooltip from "metabase/components/Tooltip";
 import CollectionEditMenu from "metabase/collections/components/CollectionEditMenu";
 
+import { PLUGIN_COLLECTION_COMPONENTS } from "metabase/plugins";
+
 import {
+  Container,
   DescriptionTooltipIcon,
+  MenuContainer,
   ToggleMobileSidebarIcon,
 } from "./CollectionHeader.styled";
 
-function Title({
-  collection: { description, name },
-  handleToggleMobileSidebar,
-}) {
+function Title({ collection, handleToggleMobileSidebar }) {
   return (
     <Flex align="center">
-      <PageHeading className="text-wrap">
-        <ToggleMobileSidebarIcon onClick={handleToggleMobileSidebar} />
-        {name}
-      </PageHeading>
-
-      {description && (
-        <Tooltip tooltip={description}>
+      <ToggleMobileSidebarIcon onClick={handleToggleMobileSidebar} />
+      <PLUGIN_COLLECTION_COMPONENTS.CollectionAuthorityLevelIcon
+        collection={collection}
+        mr={1}
+        size={24}
+      />
+      <PageHeading className="text-wrap">{collection.name}</PageHeading>
+      {collection.description && (
+        <Tooltip tooltip={collection.description}>
           <DescriptionTooltipIcon />
         </Tooltip>
       )}
@@ -101,11 +104,11 @@ function CreateCollectionLink({
 
 function Menu(props) {
   return (
-    <Flex ml="auto">
-      <PermissionsLink {...props} />
+    <MenuContainer>
       <EditMenu {...props} />
       <CreateCollectionLink {...props} />
-    </Flex>
+      <PermissionsLink {...props} />
+    </MenuContainer>
   );
 }
 
@@ -115,13 +118,13 @@ export default function CollectionHeader(props) {
   const hasWritePermission = collection && collection.can_write;
 
   return (
-    <Flex align="center" py={3}>
+    <Container>
       <Title {...props} />
       <Menu
         {...props}
         isPersonal={isPersonal}
         hasWritePermission={hasWritePermission}
       />
-    </Flex>
+    </Container>
   );
 }

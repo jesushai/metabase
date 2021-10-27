@@ -16,6 +16,7 @@
             [metabase.models.login-history :as login-history]
             [metabase.models.metric :as metric]
             [metabase.models.metric-important-field :as metric-important-field]
+            [metabase.models.moderation-review :as moderation-review]
             [metabase.models.native-query-snippet :as native-query-snippet]
             [metabase.models.permissions :as permissions]
             [metabase.models.permissions-group :as permissions-group]
@@ -28,6 +29,7 @@
             [metabase.models.query-cache :as query-cache]
             [metabase.models.query-execution :as query-execution]
             [metabase.models.revision :as revision]
+            [metabase.models.secret :as secret]
             [metabase.models.segment :as segment]
             [metabase.models.session :as session]
             [metabase.models.setting :as setting]
@@ -54,6 +56,7 @@
          field-values/keep-me
          login-history/keep-me
          metric/keep-me
+         moderation-review/keep-me
          metric-important-field/keep-me
          native-query-snippet/keep-me
          permissions/keep-me
@@ -67,6 +70,7 @@
          query-cache/keep-me
          query-execution/keep-me
          revision/keep-me
+         secret/keep-me
          segment/keep-me
          session/keep-me
          setting/keep-me
@@ -92,6 +96,7 @@
  [field-values FieldValues]
  [login-history LoginHistory]
  [metric Metric]
+ [moderation-review ModerationReview]
  [metric-important-field MetricImportantField]
  [native-query-snippet NativeQuerySnippet]
  [permissions Permissions]
@@ -105,6 +110,7 @@
  [query-cache QueryCache]
  [query-execution QueryExecution]
  [revision Revision]
+ [secret Secret]
  [segment Segment]
  [session Session]
  [setting Setting]

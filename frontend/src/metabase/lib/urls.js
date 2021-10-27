@@ -1,6 +1,6 @@
 import slugg from "slugg";
 import { serializeCardForUrl } from "metabase/lib/card";
-import { SAVED_QUESTIONS_VIRTUAL_DB_ID } from "metabase/lib/constants";
+import { SAVED_QUESTIONS_VIRTUAL_DB_ID } from "metabase/lib/saved-questions";
 import MetabaseSettings from "metabase/lib/settings";
 import Question from "metabase-lib/lib/Question";
 
@@ -28,24 +28,47 @@ export function question(card, hash = "", query = "") {
   if (hash && typeof hash === "object") {
     hash = serializeCardForUrl(hash);
   }
+
   if (query && typeof query === "object") {
     query = extractQueryParams(query)
       .map(kv => kv.map(encodeURIComponent).join("="))
       .join("&");
   }
+
   if (hash && hash.charAt(0) !== "#") {
     hash = "#" + hash;
   }
+
   if (query && query.charAt(0) !== "?") {
     query = "?" + query;
   }
+
   if (!card || !card.id) {
     return `/question${query}${hash}`;
   }
-  if (!card.name) {
-    return `/question/${card.id}${query}${hash}`;
+
+  const { card_id, id, name } = card;
+
+  /**
+   * If the question has been added to the dashboard we're reading the dashCard's properties.
+   * In that case `card_id` is the actual question's id, while `id` corresponds with the dashCard itself.
+   *
+   * There can be multiple instances of the same question in a dashboard, hence this distinction.
+   */
+  const questionId = card_id || id;
+
+  /**
+   * Although it's not possible to intentionally save a question without a name,
+   * it is possible that the `name` is not recognized if it contains symbols.
+   *
+   * Please see: https://github.com/metabase/metabase/pull/15989#pullrequestreview-656646149
+   */
+  if (!name) {
+    return `/question/${questionId}${query}${hash}`;
   }
-  const path = appendSlug(`/question/${card.id}`, slugg(card.name));
+
+  const path = appendSlug(`/question/${questionId}`, slugg(name));
+
   return `${path}${query}${hash}`;
 }
 
@@ -94,13 +117,17 @@ function prepareModel(item) {
 }
 
 export function modelToUrl(item) {
+  const modelData = prepareModel(item);
+
   switch (item.model) {
     case "card":
-      return question(prepareModel(item));
+      return question(modelData);
     case "dashboard":
-      return dashboard(prepareModel(item));
+      return dashboard(modelData);
     case "pulse":
-      return pulse(item.model_id);
+      return pulse(modelData.id);
+    case "table":
+      return tableRowsQuery(modelData.db_id, modelData.id);
     default:
       return null;
   }
@@ -194,7 +221,7 @@ export function embedDashboard(token) {
 }
 
 export function accountSettings() {
-  return `/user/edit_current`;
+  return `/account/profile`;
 }
 
 export function newUser() {

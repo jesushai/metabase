@@ -868,7 +868,7 @@
                                        :query    {:source-table (->> root
                                                                      :source
                                                                      u/the-id
-                                                                     (str "card__" ))}})))
+                                                                     (str "card__"))}})))
                  :title       (tru "Compare with entire dataset")
                  :description ""}]))})
 
@@ -1099,10 +1099,11 @@
 
 (defn- field-reference->field
   [root field-reference]
-  (let [temporal-unit (mbql.u/match-one (normalize/normalize field-reference)
-                        [:field _ (opts :guard :temporal-unit)]
-                        (:temporal-unit opts))]
-    (cond-> (->> field-reference
+  (let [normalized-field-reference (normalize/normalize field-reference)
+        temporal-unit              (mbql.u/match-one normalized-field-reference
+                                     [:field _ (opts :guard :temporal-unit)]
+                                     (:temporal-unit opts))]
+    (cond-> (->> normalized-field-reference
                  filters/collect-field-references
                  first
                  (->field root))
@@ -1168,9 +1169,9 @@
   "Recursively finds key in coll, returns true or false"
   [coll k]
   (boolean (let [coll-zip (zip/zipper coll? #(if (map? %) (vals %) %) nil coll)]
-    (loop [x coll-zip]
-      (when-not (zip/end? x)
-        (if-let [v (k (zip/node x))] true (recur (zip/next x))))))))
+            (loop [x coll-zip]
+              (when-not (zip/end? x)
+                (if-let [v (k (zip/node x))] true (recur (zip/next x))))))))
 
 (defn- splice-in
   [join-statement card-member]
@@ -1193,22 +1194,24 @@
         cell-url (format "%squestion/%s/cell/%s" public-endpoint
                          (u/the-id card)
                          (encode-base64-json cell-query))]
-    (maybe-enrich-joins card (if (table-like? card)
-      (automagic-dashboard
-       (merge (cond-> root
-                cell-query (merge {:url          cell-url
-                                   :entity       (:source root)
-                                   :rules-prefix ["table"]}))
-              opts))
-      (let [opts (assoc opts :show :all)]
-        (cond-> (reduce populate/merge-dashboards
-                        (automagic-dashboard (merge (cond-> root
-                                                      cell-query (assoc :url cell-url))
-                                                    opts))
-                        (decompose-question root card opts))
-          cell-query (merge (let [title (tru "A closer look at {0}" (cell-title root cell-query))]
-                              {:transient_name  title
-                               :name            title}))))))))
+    (maybe-enrich-joins
+     card
+     (if (table-like? card)
+       (automagic-dashboard
+        (merge (cond-> root
+                 cell-query (merge {:url          cell-url
+                                    :entity       (:source root)
+                                    :rules-prefix ["table"]}))
+               opts))
+       (let [opts (assoc opts :show :all)]
+         (cond-> (reduce populate/merge-dashboards
+                         (automagic-dashboard (merge (cond-> root
+                                                       cell-query (assoc :url cell-url))
+                                                     opts))
+                         (decompose-question root card opts))
+           cell-query (merge (let [title (tru "A closer look at {0}" (cell-title root cell-query))]
+                               {:transient_name  title
+                                :name            title}))))))))
 
 (defmethod automagic-analysis (type Query)
   [query {:keys [cell-query] :as opts}]
@@ -1216,22 +1219,24 @@
         cell-url (format "%sadhoc/%s/cell/%s" public-endpoint
                          (encode-base64-json (:dataset_query query))
                          (encode-base64-json cell-query))]
-    (maybe-enrich-joins query (if (table-like? query)
-      (automagic-dashboard
-       (merge (cond-> root
-                cell-query (merge {:url          cell-url
-                                   :entity       (:source root)
-                                   :rules-prefix ["table"]}))
-              opts))
-      (let [opts (assoc opts :show :all)]
-        (cond-> (reduce populate/merge-dashboards
-                        (automagic-dashboard (merge (cond-> root
-                                                      cell-query (assoc :url cell-url))
-                                                    opts))
-                       (decompose-question root query opts))
-          cell-query (merge (let [title (tru "A closer look at the {0}" (cell-title root cell-query))]
-                              {:transient_name  title
-                               :name            title}))))))))
+    (maybe-enrich-joins
+     query
+     (if (table-like? query)
+       (automagic-dashboard
+        (merge (cond-> root
+                 cell-query (merge {:url          cell-url
+                                    :entity       (:source root)
+                                    :rules-prefix ["table"]}))
+               opts))
+       (let [opts (assoc opts :show :all)]
+         (cond-> (reduce populate/merge-dashboards
+                         (automagic-dashboard (merge (cond-> root
+                                                       cell-query (assoc :url cell-url))
+                                                     opts))
+                         (decompose-question root query opts))
+           cell-query (merge (let [title (tru "A closer look at the {0}" (cell-title root cell-query))]
+                               {:transient_name  title
+                                :name            title}))))))))
 
 (defmethod automagic-analysis (type Field)
   [field opts]

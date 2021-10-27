@@ -396,7 +396,7 @@ export function initializeIframeResizer(readyCallback = () => {}) {
   } else {
     window.iFrameResizer = {
       autoResize: true,
-      heightCalculationMethod: "bodyScroll",
+      heightCalculationMethod: "max",
       readyCallback: readyCallback,
     };
 
@@ -425,4 +425,9 @@ export function isEventOverElement(event, element) {
   const { top, bottom, left, right } = element.getBoundingClientRect();
 
   return y >= top && y <= bottom && x >= left && x <= right;
+}
+
+export function isReducedMotionPreferred() {
+  const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  return mediaQuery && mediaQuery.matches;
 }

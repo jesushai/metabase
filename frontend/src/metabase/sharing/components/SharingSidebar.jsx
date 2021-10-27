@@ -11,10 +11,9 @@ import {
   AddEditEmailSidebar,
 } from "metabase/sharing/components/AddEditSidebar";
 import Sidebar from "metabase/dashboard/components/Sidebar";
-import Collections from "metabase/entities/collections";
 import Pulses from "metabase/entities/pulses";
 import User from "metabase/entities/users";
-import { normalizeParameterValue } from "metabase/meta/Parameter";
+import { normalizeParameterValue } from "metabase/parameters/utils/parameter-values";
 
 import { connect } from "react-redux";
 
@@ -22,18 +21,14 @@ import {
   cleanPulse,
   createChannel,
   getPulseParameters,
+  NEW_PULSE_TEMPLATE,
 } from "metabase/lib/pulse";
 
-import {
-  getPulseId,
-  getEditingPulse,
-  getPulseFormInput,
-} from "metabase/pulse/selectors";
+import { getEditingPulse, getPulseFormInput } from "metabase/pulse/selectors";
 
 import { getUser } from "metabase/selectors/user";
 
 import {
-  setEditingPulse,
   updateEditingPulse,
   saveEditingPulse,
   fetchPulseFormInput,
@@ -98,18 +93,12 @@ const getEditingPulseWithDefaults = (state, props) => {
 };
 
 const mapStateToProps = (state, props) => ({
-  pulseId: getPulseId(state, props),
   pulse: getEditingPulseWithDefaults(state, props),
   formInput: getPulseFormInput(state, props),
   user: getUser(state),
-  initialCollectionId: Collections.selectors.getInitialCollectionId(
-    state,
-    props,
-  ),
 });
 
 const mapDispatchToProps = {
-  setEditingPulse,
   updateEditingPulse,
   saveEditingPulse,
   fetchPulseFormInput,
@@ -130,6 +119,7 @@ class SharingSidebar extends React.Component {
     editingMode: "list-pulses",
     // use this to know where to go "back" to
     returnMode: [],
+    isSaving: false,
   };
 
   static propTypes = {
@@ -138,9 +128,7 @@ class SharingSidebar extends React.Component {
     formInput: PropTypes.object.isRequired,
     initialCollectionId: PropTypes.number,
     pulse: PropTypes.object.isRequired,
-    pulseId: PropTypes.number,
     saveEditingPulse: PropTypes.func.isRequired,
-    setEditingPulse: PropTypes.func.isRequired,
     testPulse: PropTypes.func.isRequired,
     updateEditingPulse: PropTypes.func.isRequired,
     pulses: PropTypes.array.isRequired,
@@ -154,8 +142,8 @@ class SharingSidebar extends React.Component {
     this.props.updateEditingPulse(pulse);
   };
 
-  addChannel = type => {
-    const { dashboard, pulse, formInput } = this.props;
+  setPulseWithChannel = type => {
+    const { dashboard, formInput } = this.props;
 
     const channelSpec = formInput.channels[type];
     if (!channelSpec) {
@@ -165,8 +153,8 @@ class SharingSidebar extends React.Component {
     const channel = createChannel(channelSpec);
 
     const newPulse = {
-      ...pulse,
-      channels: pulse.channels.concat(channel),
+      ...NEW_PULSE_TEMPLATE,
+      channels: [channel],
       cards: nonTextCardsFromDashboard(dashboard),
     };
     this.setPulse(newPulse);
@@ -174,11 +162,6 @@ class SharingSidebar extends React.Component {
 
   componentDidMount = async () => {
     await this.props.fetchPulseFormInput();
-
-    this.props.setEditingPulse(
-      this.props.pulseId,
-      this.props.initialCollectionId,
-    );
   };
 
   onChannelPropertyChange = (index, name, value) => {
@@ -216,6 +199,11 @@ class SharingSidebar extends React.Component {
 
   handleSave = async () => {
     const { pulse, dashboard, formInput } = this.props;
+    const { isSaving } = this.state;
+
+    if (isSaving) {
+      return;
+    }
 
     const cleanedPulse = cleanPulse(pulse, formInput.channels);
     cleanedPulse.name = dashboard.name;
@@ -241,11 +229,14 @@ class SharingSidebar extends React.Component {
       },
     );
 
-    await this.props.updateEditingPulse(cleanedPulse);
-
-    // The order below matters; it hides the "Done" button faster and prevents two pulses from being made if it's double-clicked
-    this.setState({ editingMode: "list-pulses", returnMode: [] });
-    await this.props.saveEditingPulse();
+    try {
+      this.setState({ isSaving: true });
+      await this.props.updateEditingPulse(cleanedPulse);
+      await this.props.saveEditingPulse();
+      this.setState({ editingMode: "list-pulses", returnMode: [] });
+    } finally {
+      this.setState({ isSaving: false });
+    }
   };
 
   createSubscription = () => {
@@ -255,8 +246,6 @@ class SharingSidebar extends React.Component {
         returnMode: returnMode.concat([editingMode]),
       };
     });
-
-    this.props.setEditingPulse(null, null);
   };
 
   editPulse = (pulse, channelType) => {
@@ -310,6 +299,7 @@ class SharingSidebar extends React.Component {
       return (
         <PulsesListSidebar
           pulses={pulses}
+          formInput={formInput}
           createSubscription={this.createSubscription}
           onCancel={this.onCancel}
           editPulse={this.editPulse}
@@ -390,6 +380,7 @@ class SharingSidebar extends React.Component {
             this.onChannelScheduleChange,
             index,
           )}
+          testPulse={testPulse}
           toggleSkipIfEmpty={this.toggleSkipIfEmpty}
           handleArchive={this.handleArchive}
           dashboard={dashboard}
@@ -417,7 +408,7 @@ class SharingSidebar extends React.Component {
                   returnMode: returnMode.concat([editingMode]),
                 };
               });
-              this.addChannel("email");
+              this.setPulseWithChannel("email");
             }
           }}
           onNewSlackPulse={() => {
@@ -428,7 +419,7 @@ class SharingSidebar extends React.Component {
                   returnMode: returnMode.concat([editingMode]),
                 };
               });
-              this.addChannel("slack");
+              this.setPulseWithChannel("slack");
             }
           }}
         />

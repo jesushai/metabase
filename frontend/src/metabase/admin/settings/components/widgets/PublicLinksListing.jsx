@@ -9,7 +9,7 @@ import { t } from "ttag";
 import { CardApi, DashboardApi } from "metabase/services";
 import * as Urls from "metabase/lib/urls";
 
-import MetabaseAnalytics from "metabase/lib/analytics";
+import * as MetabaseAnalytics from "metabase/lib/analytics";
 
 type PublicLink = {
   id: string,
@@ -43,7 +43,7 @@ export default class PublicLinksListing extends Component {
     };
   }
 
-  UNSAFE_componentWillMount() {
+  componentDidMount() {
     this.load();
   }
 
@@ -69,7 +69,7 @@ export default class PublicLinksListing extends Component {
   }
 
   trackEvent(label: string) {
-    MetabaseAnalytics.trackEvent(`Admin ${this.props.type}`, label);
+    MetabaseAnalytics.trackStructEvent(`Admin ${this.props.type}`, label);
   }
 
   render() {

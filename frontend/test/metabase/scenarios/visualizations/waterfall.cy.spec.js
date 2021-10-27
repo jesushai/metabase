@@ -3,6 +3,7 @@ import {
   restore,
   visitQuestionAdhoc,
   openNativeEditor,
+  visualize,
 } from "__support__/e2e/cypress";
 import { SAMPLE_DATASET } from "__support__/e2e/cypress_sample_dataset";
 
@@ -50,9 +51,38 @@ describe("scenarios > visualizations > waterfall", () => {
     verifyWaterfallRendering("PRODUCT", "PROFIT");
   });
 
+  it("should work with ordinal series and numeric X-axis (metabase#15550)", () => {
+    openNativeEditor().type(
+      "select 1 as X, 20 as Y union select 2 as X, -10 as Y",
+    );
+
+    cy.get(".NativeQueryEditor .Icon-play").click();
+    cy.contains("Visualization").click();
+    cy.icon("waterfall").click();
+
+    cy.contains("Select a field").click();
+    cy.get(".List-item")
+      .contains("X")
+      .click();
+
+    cy.contains("Select a field").click();
+    cy.get(".List-item")
+      .contains("Y")
+      .click();
+
+    cy.contains("Axes").click();
+
+    cy.contains("Linear").click();
+    cy.get(".List-item")
+      .contains("Ordinal")
+      .click();
+
+    verifyWaterfallRendering("X", "Y");
+  });
+
   it("should work with quantitative series", () => {
     openNativeEditor().type(
-      "select 1 as xx, 10 as yy union select 2 as xx, -2 as yy",
+      "select 1 as X, 10 as Y union select 2 as X, -2 as Y",
     );
     cy.get(".NativeQueryEditor .Icon-play").click();
     cy.contains("Visualization").click();
@@ -60,14 +90,14 @@ describe("scenarios > visualizations > waterfall", () => {
 
     cy.contains("Select a field").click();
     cy.get(".List-item")
-      .first()
-      .click(); // X
+      .contains("X")
+      .click();
     cy.contains("Select a field").click();
     cy.get(".List-item")
-      .last()
-      .click(); // Y
+      .contains("Y")
+      .click();
 
-    verifyWaterfallRendering("XX", "YY");
+    verifyWaterfallRendering("X", "Y");
   });
 
   it("should work with time-series data", () => {
@@ -83,7 +113,8 @@ describe("scenarios > visualizations > waterfall", () => {
       .blur();
     cy.button("Done").click();
 
-    cy.button("Visualize").click();
+    visualize();
+
     cy.contains("Visualization").click();
     cy.icon("waterfall").click();
 
@@ -97,7 +128,8 @@ describe("scenarios > visualizations > waterfall", () => {
     cy.findByText("Pick a column to group by").click();
     cy.findByText("Created At").click();
 
-    cy.button("Visualize").click();
+    visualize();
+
     cy.contains("Visualization").click();
     cy.icon("waterfall").click();
 
@@ -106,7 +138,7 @@ describe("scenarios > visualizations > waterfall", () => {
     });
   });
 
-  it.skip("should not be enabled for multi-series questions (metabase#15152)", () => {
+  it("should show error for multi-series questions (metabase#15152)", () => {
     cy.server();
     cy.route("POST", "/api/dataset").as("dataset");
 
@@ -126,14 +158,18 @@ describe("scenarios > visualizations > waterfall", () => {
     });
 
     cy.wait("@dataset");
-    cy.findByText("Visualization").click();
 
-    cy.findByText("Waterfall")
-      .parent()
-      .should("not.have.css", "opacity", "1");
+    cy.findByText("Visualization").click();
+    cy.findByTestId("Waterfall-button").click();
+    cy.findByText("Waterfall chart does not support multiple series");
+
+    cy.findByTestId("remove-count").click();
+    cy.get(".CardVisualization svg"); // Chart renders after removing the second metric
+
+    cy.findByText("Add another series...").should("not.exist");
   });
 
-  it.skip("should work for unaggregated data (metabase#15465)", () => {
+  it("should work for unaggregated data (metabase#15465)", () => {
     visitQuestionAdhoc({
       dataset_query: {
         type: "native",

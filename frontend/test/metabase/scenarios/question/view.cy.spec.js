@@ -1,4 +1,9 @@
-import { restore, openOrdersTable, popover } from "__support__/e2e/cypress";
+import {
+  restore,
+  openOrdersTable,
+  popover,
+  getAddDimensionButton,
+} from "__support__/e2e/cypress";
 import { SAMPLE_DATASET } from "__support__/e2e/cypress_sample_dataset";
 
 const { PRODUCTS } = SAMPLE_DATASET;
@@ -56,12 +61,7 @@ describe("scenarios > question > view", () => {
 
       cy.contains("Count by Created At: Year");
 
-      cy.get("@sidebar")
-        .contains("Category")
-        .parent()
-        .parent()
-        .find(".Field-extra .Icon")
-        .click({ force: true }); // we need to force this because it only displays on hover
+      getAddDimensionButton({ name: "Category" }).click();
 
       cy.contains("Done").click();
 
@@ -90,16 +90,18 @@ describe("scenarios > question > view", () => {
   describe("apply filters without data permissions", () => {
     beforeEach(() => {
       // All users upgraded to collection view access
-      cy.visit("/admin/permissions/collections");
+      cy.visit("/admin/permissions/collections/root");
       cy.icon("close")
         .first()
         .click();
-      cy.findByText("View collection").click();
-      cy.findByText("Save Changes").click();
+      cy.findAllByRole("option")
+        .contains("View")
+        .click();
+      cy.findByText("Save changes").click();
       cy.findByText("Yes").click();
 
       // Native query saved in dasbhoard
-      cy.createDashboard("Dashboard");
+      cy.createDashboard();
 
       cy.createNativeQuestion({
         name: "Question",
@@ -165,14 +167,21 @@ describe("scenarios > question > view", () => {
       // Filter by category and vendor
       // TODO: this should show values and allow searching
       cy.findByText("This question is written in SQL.");
-      cy.findByPlaceholderText("VENDOR")
-        .click()
-        .clear()
-        .type("Balistreri-Muller");
-      cy.findByPlaceholderText("CATEGORY")
-        .click()
-        .clear()
-        .type("Widget");
+      cy.findAllByText("VENDOR")
+        .first()
+        .click();
+      popover().within(() => {
+        cy.findByPlaceholderText("Enter some text").type("Balistreri-Muller");
+        cy.findByText("Add filter").click();
+      });
+      cy.findAllByText("CATEGORY")
+        .first()
+        .click();
+      popover().within(() => {
+        cy.findByPlaceholderText("Enter some text").type("Widget");
+        cy.findByText("Add filter").click();
+      });
+
       cy.get(".RunButton")
         .last()
         .click();
