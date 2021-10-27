@@ -1,36 +1,28 @@
-/* eslint-disable react/prop-types */
-import React from "react";
+import React, { useCallback, useEffect, useState } from "react";
+import PropTypes from "prop-types";
 import { connect } from "react-redux";
-import { Box } from "grid-styled";
 import { t } from "ttag";
-
-import * as Urls from "metabase/lib/urls";
+import _ from "underscore";
 
 import Collection from "metabase/entities/collections";
+import { getUser } from "metabase/selectors/user";
 
-import CollectionDropTarget from "metabase/containers/dnd/CollectionDropTarget";
+import {
+  LoadingContainer,
+  LoadingTitle,
+  Sidebar,
+  ToggleMobileSidebarIcon,
+} from "./CollectionSidebar.styled";
 
-import { Sidebar, ToggleMobileSidebarIcon } from "./CollectionSidebar.styled";
-import Icon from "metabase/components/Icon";
-import Link from "metabase/components/Link";
+import RootCollectionLink from "./RootCollectionLink/RootCollectionLink";
+import Footer from "./CollectionSidebarFooter/CollectionSidebarFooter";
+import Collections from "./Collections/Collections";
 import LoadingSpinner from "metabase/components/LoadingSpinner";
 
-import CollectionsList from "metabase/collections/components/CollectionsList";
-import CollectionLink from "metabase/collections/components/CollectionLink";
+import { getParentPath } from "metabase/collections/utils";
+import { updateOpenCollectionList } from "./updateOpenCollectionList";
 
-import { SIDEBAR_SPACER } from "metabase/collections/constants";
-import {
-  nonPersonalOrArchivedCollection,
-  currentUserPersonalCollections,
-  getParentPath,
-} from "metabase/collections/utils";
-
-const getCurrentUser = ({ currentUser }) => ({ currentUser });
-
-@Collection.loadList({
-  /* pass "tree" here so that the collection entity knows to use the /tree endpoint and send children in the response
-    we should eventually refactor code elsewhere in the app to use this by default instead of determining the relationships clientside, but this works in the interim
-  */
+const collectionEntityQuery = {
   query: () => ({ tree: true }),
 
   // Using the default loading wrapper breaks the UI,
@@ -38,131 +30,108 @@ const getCurrentUser = ({ currentUser }) => ({ currentUser });
   // It's disabled, so loading can be displayed appropriately
   // See: https://github.com/metabase/metabase/issues/14603
   loadingAndErrorWrapper: false,
-})
-class CollectionSidebar extends React.Component {
-  state = {
-    openCollections: [],
+};
+
+function mapStateToProps(state) {
+  return {
+    currentUser: getUser(state),
   };
-
-  componentDidUpdate(prevProps) {
-    const { collectionId, collections, loading } = this.props;
-    const loaded = prevProps.loading && !loading;
-    if (loaded) {
-      const ancestors = getParentPath(collections, collectionId) || [];
-      this.setState({ openCollections: ancestors });
-    }
-  }
-
-  onOpen = id => {
-    this.setState({ openCollections: this.state.openCollections.concat(id) });
-  };
-
-  onClose = id => {
-    this.setState({
-      openCollections: this.state.openCollections.filter(c => {
-        return c !== id;
-      }),
-    });
-  };
-
-  // TODO Should we update the API to filter archived collections?
-  filterPersonalCollections = collection => !collection.archived;
-
-  renderContent = () => {
-    const {
-      currentUser,
-      handleToggleMobileSidebar,
-      isRoot,
-      collectionId,
-      list,
-    } = this.props;
-    return (
-      <React.Fragment>
-        <ToggleMobileSidebarIcon onClick={handleToggleMobileSidebar} />
-        <Collection.Loader id="root">
-          {({ collection: root }) => (
-            <Box mb={1} mt={2}>
-              <CollectionDropTarget collection={root}>
-                {({ highlighted, hovered }) => (
-                  <CollectionLink
-                    to={Urls.collection({ id: "root" })}
-                    selected={isRoot}
-                    highlighted={highlighted}
-                    hovered={hovered}
-                  >
-                    {t`Our analytics`}
-                  </CollectionLink>
-                )}
-              </CollectionDropTarget>
-            </Box>
-          )}
-        </Collection.Loader>
-
-        <Box pb={4}>
-          <CollectionsList
-            openCollections={this.state.openCollections}
-            onClose={this.onClose}
-            onOpen={this.onOpen}
-            collections={list}
-            filter={nonPersonalOrArchivedCollection}
-            currentCollection={collectionId}
-          />
-
-          <Box>
-            <CollectionsList
-              openCollections={this.state.openCollections}
-              onClose={this.onClose}
-              onOpen={this.onOpen}
-              collections={currentUserPersonalCollections(list, currentUser.id)}
-              initialIcon="person"
-              filter={this.filterPersonalCollections}
-              currentCollection={collectionId}
-            />
-          </Box>
-        </Box>
-
-        <Box className="mt-auto" pb={2} pl={SIDEBAR_SPACER * 2}>
-          {currentUser.is_superuser && (
-            <Link
-              my={2}
-              to={Urls.collection({ id: "users" })}
-              className="flex align-center text-bold text-light text-brand-hover"
-            >
-              <Icon name="group" mr={1} />
-              {t`Other users' personal collections`}
-            </Link>
-          )}
-          <Link
-            to={`/archive`}
-            className="flex align-center text-bold text-light text-brand-hover"
-          >
-            <Icon name="view_archive" mr={1} />
-            {t`View archive`}
-          </Link>
-        </Box>
-      </React.Fragment>
-    );
-  };
-
-  render() {
-    const { allFetched } = this.props;
-
-    return (
-      <Sidebar
-        role="tree"
-        shouldDisplayMobileSidebar={this.props.shouldDisplayMobileSidebar}
-      >
-        {allFetched ? (
-          this.renderContent()
-        ) : (
-          <div className="text-brand text-centered">
-            <LoadingSpinner />
-            <h2 className="text-normal text-light mt1">{t`Loading…`}</h2>
-          </div>
-        )}
-      </Sidebar>
-    );
-  }
 }
 
-export default connect(getCurrentUser)(CollectionSidebar);
+CollectionSidebar.propTypes = {
+  currentUser: PropTypes.object.isRequired,
+  collectionId: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+  collections: PropTypes.arrayOf(PropTypes.object).isRequired,
+  isRoot: PropTypes.bool,
+  allFetched: PropTypes.bool,
+  loading: PropTypes.bool,
+  list: PropTypes.arrayOf(PropTypes.object),
+  shouldDisplayMobileSidebar: PropTypes.bool,
+  handleToggleMobileSidebar: PropTypes.func,
+};
+
+function CollectionSidebar({
+  currentUser,
+  collectionId,
+  collections,
+  isRoot,
+  allFetched,
+  loading,
+  list,
+  shouldDisplayMobileSidebar,
+  handleToggleMobileSidebar,
+}) {
+  const [openCollections, setOpenCollections] = useState([]);
+
+  const onOpen = useCallback(
+    id => {
+      setOpenCollections([...openCollections, id]);
+    },
+    [openCollections],
+  );
+
+  const onClose = useCallback(
+    id => {
+      const newOpenCollections = updateOpenCollectionList(
+        id,
+        collections,
+        openCollections,
+      );
+      setOpenCollections(newOpenCollections);
+    },
+    [collections, openCollections],
+  );
+
+  useEffect(() => {
+    if (!loading && collectionId) {
+      const ancestors = getParentPath(collections || [], collectionId) || [];
+      setOpenCollections(ancestors);
+    }
+    // collections list is intentionally not listed in dependencies
+    // otherwise, the hook can close manually opened collections
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collectionId, loading]);
+
+  return (
+    <Sidebar
+      role="tree"
+      shouldDisplayMobileSidebar={shouldDisplayMobileSidebar}
+    >
+      {allFetched ? (
+        <React.Fragment>
+          <ToggleMobileSidebarIcon onClick={handleToggleMobileSidebar} />
+          <RootCollectionLink
+            isRoot={isRoot}
+            handleToggleMobileSidebar={handleToggleMobileSidebar}
+          />
+          <Collections
+            list={list}
+            openCollections={openCollections}
+            collectionId={collectionId}
+            currentUserId={currentUser.id}
+            handleToggleMobileSidebar={handleToggleMobileSidebar}
+            onOpen={onOpen}
+            onClose={onClose}
+          />
+          <Footer isAdmin={currentUser.is_superuser} />
+        </React.Fragment>
+      ) : (
+        <LoadingView />
+      )}
+    </Sidebar>
+  );
+}
+
+function LoadingView() {
+  return (
+    <LoadingContainer>
+      <LoadingSpinner />
+      <LoadingTitle>{t`Loading…`}</LoadingTitle>
+    </LoadingContainer>
+  );
+}
+
+export default _.compose(
+  Collection.loadList(collectionEntityQuery),
+  connect(mapStateToProps),
+)(CollectionSidebar);

@@ -106,7 +106,7 @@
     :default                                 :unknown))
 
 (defn- instance-settings
-  "Figure out global info about his instance"
+  "Figure out global info about this instance"
   []
   {:version              (config/mb-version-info :tag)
    :running_on           (environment-type)
@@ -397,10 +397,10 @@
 (defn- send-stats!
   "send stats to Metabase tracking server"
   [stats]
-   (try
-      (client/post metabase-usage-url {:form-params stats, :content-type :json, :throw-entire-message? true})
-      (catch Throwable e
-        (log/error e (trs "Sending usage stats FAILED")))))
+  (try
+     (client/post metabase-usage-url {:form-params stats, :content-type :json, :throw-entire-message? true})
+     (catch Throwable e
+       (log/error e (trs "Sending usage stats FAILED")))))
 
 
 (defn phone-home-stats!

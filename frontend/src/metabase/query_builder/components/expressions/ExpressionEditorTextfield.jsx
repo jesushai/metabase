@@ -51,31 +51,34 @@ const HelpText = ({ helpText, width }) =>
       style={{ width: width }}
       isOpen
     >
-      <p
-        className="p2 m0 text-monospace text-bold"
-        style={{ background: colors["bg-yellow"] }}
-      >
-        {helpText.structure}
-      </p>
-      <div className="p2 border-top">
-        <p className="mt0 text-bold">{helpText.description}</p>
-        <p className="text-code m0 text-body">{helpText.example}</p>
-      </div>
-      <div className="p2 border-top">
-        {helpText.args.map(({ name, description }, index) => (
-          <div key={index}>
-            <h4 className="text-medium">{name}</h4>
-            <p className="mt1 text-bold">{description}</p>
-          </div>
-        ))}
-        <ExternalLink
-          className="link text-bold block my1"
-          target="_blank"
-          href={MetabaseSettings.docsUrl("users-guide/expressions")}
+      {/* Prevent stealing focus from input box causing the help text to be closed (metabase#17548) */}
+      <div onMouseDown={e => e.preventDefault()}>
+        <p
+          className="p2 m0 text-monospace text-bold"
+          style={{ background: colors["bg-yellow"] }}
         >
-          <Icon name="reference" size={12} className="mr1" />
-          {t`Learn more`}
-        </ExternalLink>
+          {helpText.structure}
+        </p>
+        <div className="p2 border-top">
+          <p className="mt0 text-bold">{helpText.description}</p>
+          <p className="text-code m0 text-body">{helpText.example}</p>
+        </div>
+        <div className="p2 border-top">
+          {helpText.args.map(({ name, description }, index) => (
+            <div key={index}>
+              <h4 className="text-medium">{name}</h4>
+              <p className="mt1 text-bold">{description}</p>
+            </div>
+          ))}
+          <ExternalLink
+            className="link text-bold block my1"
+            target="_blank"
+            href={MetabaseSettings.docsUrl("users-guide/expressions")}
+          >
+            <Icon name="reference" size={12} className="mr1" />
+            {t`Learn more`}
+          </ExternalLink>
+        </div>
       </div>
     </Popover>
   ) : null;
@@ -136,7 +139,7 @@ export default class ExpressionEditorTextfield extends React.Component {
       const parserOptions = this._getParserOptions(newProps);
       const source = format(newProps.expression, parserOptions);
 
-      const { expression, compileError, syntaxTree } =
+      const { expression, compileError } =
         source && source.length
           ? this._processSource({
               source,
@@ -146,14 +149,12 @@ export default class ExpressionEditorTextfield extends React.Component {
               expression: null,
               tokenizerError: [],
               compileError: null,
-              syntaxTree: null,
             };
       this.setState({
         source,
         expression,
         tokenizeError: [],
         compileError,
-        syntaxTree,
         suggestions: [],
         highlightedSuggestionIndex: 0,
       });
@@ -250,10 +251,19 @@ export default class ExpressionEditorTextfield extends React.Component {
     this.setState({
       suggestions: [],
       highlightedSuggestionIndex: 0,
+      helpText: null,
     });
   }
 
-  onInputBlur = () => {
+  onInputBlur = e => {
+    // Switching to another window also triggers the blur event.
+    // When our window gets focus again, the input will automatically
+    // get focus, so ignore the blue event to avoid showing an
+    // error message when the user is not actually done.
+    if (e.target === document.activeElement) {
+      return;
+    }
+
     this.clearSuggestions();
 
     const { tokenizerError, compileError } = this.state;
@@ -265,7 +275,7 @@ export default class ExpressionEditorTextfield extends React.Component {
         displayError.push(compileError);
       }
     }
-    this.setState({ displayError, helpText: null });
+    this.setState({ displayError });
 
     // whenever our input blurs we push the updated expression to our parent if valid
     if (this.state.expression) {
@@ -307,13 +317,7 @@ export default class ExpressionEditorTextfield extends React.Component {
     const endsWithWhitespace = /\s$/.test(source);
     const targetOffset = !hasSelection ? selectionEnd : null;
 
-    const {
-      expression,
-      compileError,
-      suggestions,
-      helpText,
-      syntaxTree,
-    } = source
+    const { expression, compileError, suggestions, helpText } = source
       ? this._processSource({
           source,
           targetOffset,
@@ -324,7 +328,6 @@ export default class ExpressionEditorTextfield extends React.Component {
           compileError: null,
           suggestions: [],
           helpText: null,
-          syntaxTree: null,
         };
 
     const isValid = expression !== undefined;
@@ -373,7 +376,6 @@ export default class ExpressionEditorTextfield extends React.Component {
     this.setState({
       source,
       expression,
-      syntaxTree,
       tokenizerError,
       compileError,
       displayError: null,
@@ -394,7 +396,7 @@ export default class ExpressionEditorTextfield extends React.Component {
 
   render() {
     const { placeholder } = this.props;
-    const { displayError, source, suggestions, syntaxTree } = this.state;
+    const { displayError, source, suggestions } = this.state;
 
     const inputClassName = cx("input text-bold text-monospace", {
       "text-dark": source,
@@ -424,7 +426,7 @@ export default class ExpressionEditorTextfield extends React.Component {
           style={{ ...inputStyle, paddingLeft: 26, whiteSpace: "pre-wrap" }}
           placeholder={placeholder}
           value={source}
-          syntaxTree={syntaxTree}
+          startRule={this.props.startRule}
           parserOptions={this._getParserOptions()}
           onChange={e => this.onExpressionChange(e.target.value)}
           onKeyDown={this.onInputKeyDown}

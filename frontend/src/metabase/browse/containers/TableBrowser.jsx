@@ -9,7 +9,7 @@ import { getMetadata } from "metabase/selectors/metadata";
 
 import Table from "metabase/entities/tables";
 
-import { SAVED_QUESTIONS_VIRTUAL_DB_ID } from "metabase/lib/constants";
+import { SAVED_QUESTIONS_VIRTUAL_DB_ID } from "metabase/lib/saved-questions";
 import { color } from "metabase/lib/colors";
 import * as Urls from "metabase/lib/urls";
 
@@ -82,7 +82,7 @@ function TableBrowser(props) {
             // NOTE: don't clean since we might not have all the metadata loaded?
             metadataTable.newQuestion().getUrl({ clean: false });
           return (
-            <GridItem w={ITEM_WIDTHS} key={table.id}>
+            <GridItem width={ITEM_WIDTHS} key={table.id}>
               <Card hoverable px={1} className="hover-parent hover--visibility">
                 <Link
                   to={link}

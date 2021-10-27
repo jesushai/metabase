@@ -110,7 +110,7 @@ class Overworld extends React.Component {
                                       <Icon
                                         ml="2"
                                         name="close"
-                                        className="hover-child text-brand-hover"
+                                        className="block hover-child text-brand-hover"
                                       />
                                     </Tooltip>
                                   }
@@ -164,7 +164,7 @@ class Overworld extends React.Component {
                   {items.map(pin => {
                     return (
                       <GridItem
-                        w={[1, 1 / 2, 1 / 3]}
+                        width={[1, 1 / 2, 1 / 3]}
                         key={`${pin.model}-${pin.id}`}
                       >
                         <Link
@@ -200,7 +200,6 @@ class Overworld extends React.Component {
               <CollectionList
                 collections={this.props.list}
                 analyticsContext="Homepage"
-                asCards={true}
               />
             ) : (
               <Box className="text-centered">
@@ -289,7 +288,7 @@ class Overworld extends React.Component {
                   <Box mb={4}>
                     <Grid>
                       {databases.map(database => (
-                        <GridItem w={[1, 1 / 3]} key={database.id}>
+                        <GridItem width={[1, 1 / 3]} key={database.id}>
                           <Link
                             to={Urls.browseDatabase(database)}
                             hover={{ color: color("brand") }}

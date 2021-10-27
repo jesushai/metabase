@@ -1,37 +1,103 @@
-## Getting Help
+# Metabase documentation and resources
 
-#### [FAQs](faq/start.md)
+## Tutorials
+
+### [Learn Metabase][learn]
+
+Learn how to set Metabase up, build out your analytics, organize things and set permissions, and how to do data ops right.
+
+## Getting help
+
+### [Troubleshooting Guide][troubleshooting]
+
+Problems, their causes, how to detect them, and how to fix them.
+
+### [Metabase forum][forum]
+
+A place to get help on installation, setting up as well as sharing tips and tricks.
+
+### [FAQs][faq]
 
 Frequently asked questions about Metabase.
 
-#### [Troubleshooting Guide](troubleshooting-guide/index.md)
-Have a problem and need help? Start with our troubleshooting guide.
+## Metabase reference guides
 
-## In-depth Guides
+Documentation guides for the Metabase application.
 
-#### [Users Guide](users-guide/start.md)
-This is the go-to guide on asking questions and sharing answers using Metabase. You'll learn in depth about how questions are expressed, how to chart answers, as well as how to share questions and create dashboards.
+### [Users Guide][users-guide]
 
-#### [Admin Guide](administration-guide/start.md)
-This guide is for advanced users and those who will be setting up and maintaining a Metabase installation. You'll learn how to set the instance up, how to configure common settings, how to manage user accounts, and how to add databases.
+How to ask questions, how to visualize answers, as well as how to share questions and create dashboards.
 
-#### [Operations Guide](operations-guide/start.md)
-This guide contains more detailed information about how to install Metabase for production use. It covers topics like SSL termination, deploying via Docker Containers vs. Jars, as well as the tradeoffs involved.
+### [Admin Guide][admin-guide]
 
-## Enterprise Edition
+How to set up Metabase, configure common settings, manage accounts and permissions, and add databases.
 
-#### [Enterprise Features Guide](./enterprise-guide/start.md)
-Here’s where to go for help using the features included in the Enterprise Edition of Metabase.
+### [Operations Guide][operations-guide]
 
-## For Developers
+Learn how to install Metabase for production use. The guide covers topics like SSL termination, deploying via Docker Containers vs. JAR files, as well as the tradeoffs involved.
 
-#### [Developers Guide](developers-guide.md)
-This guide covers how to contribute back to the Metabase open source project. It includes setting up a development environment, running tests, and the contribution and product process Metabase follows.
+### [Enterprise Guide][enterprise]
 
-#### [Driver Development](developers-guide-drivers.md)
-Want to write your own database driver? This guide lists existing community drivers and shows how to get started with driver development.
+Here’s where to go for help using the features included in [Metabase Enterprise Edition][enterprise-landing].
+
+## Metabase for developers
+
+### [Developers Guide][developers]
+
+Learn how to contribute to the Metabase open source project.
+
+### [Driver Development][drivers]
+
+This guide lists existing community drivers, and shows how to get started with driver development.
+
+### [Embedding reference apps][embedding-ref-apps]
+
+Code examples for embedding Metabase in applications.
+
+## Metabase community
+
+Connect with others using Metabase and catch up on the latest news.
+
+### [Metabase forum][forum]
+
+A place to get help on installation, setting up as well as sharing tips and tricks.
+
+### [Data Bytes][data-bytes]
+
+Real stories about teams working and learning with data. You can also share your own stories.
+
+### [Case studies][case-studies]
+
+See how other organizations, big and small, have leveled up using Metabase.
+
+### [Blog][blog]
+
+Stay up to date on the latest from Metabase.
+
+### [Source code repository on GitHub][source-code]
+
+Metabase is open source: come on over and check out the code.
 
 ## Reference
 
-#### [Anonymous Information Collection Reference](information-collection.md)
-This describes the anonymous usage information we collect (if you opt-in) as well as why we collect it and the ways we use it.
+### [Anonymous Information Collection Reference][info-collection]
+
+This page describes the anonymous usage information we collect (only if you opt-in), why we collect it, and how we use it to improve Metabase.
+
+[admin-guide]: administration-guide/start.md
+[blog]: /blog
+[case-studies]: https://www.metabase.com/case_studies/
+[embedding-ref-apps]: https://github.com/metabase/embedding-reference-apps
+[enterprise]: enterprise-guide/start.md
+[enterprise-landing]: /enterprise
+[data-bytes]: /community
+[developers]: developers-guide/start.md
+[drivers]: developers-guide-drivers.md
+[faq]: faq/start.md
+[forum]: https://discourse.metabase.com/
+[info-collection]: information-collection.md
+[learn]: /learn
+[operations-guide]: operations-guide/start.md
+[source-code]: https://github.com/metabase/metabase
+[troubleshooting]: troubleshooting-guide/index.md
+[users-guide]: users-guide/start.md

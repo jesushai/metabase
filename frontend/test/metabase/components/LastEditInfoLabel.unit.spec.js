@@ -1,12 +1,7 @@
 import React from "react";
-import { render } from "@testing-library/react";
-import "@testing-library/jest-dom/extend-expect";
+import { renderWithProviders } from "__support__/ui";
 import mockDate from "mockdate";
-
 import moment from "moment";
-import { Provider } from "react-redux";
-import { getStore } from "metabase/store";
-
 import LastEditInfoLabel from "metabase/components/LastEditInfoLabel";
 
 describe("LastEditInfoLabel", () => {
@@ -35,13 +30,11 @@ describe("LastEditInfoLabel", () => {
       return isLastEditedByCurrentUser ? TEST_USER : { id: TEST_USER.id + 1 };
     }
 
-    const store = getStore({ currentUser: userReducer });
-
-    return render(
-      <Provider store={store}>
-        <LastEditInfoLabel item={testItem} data-testid="label" />
-      </Provider>,
-    );
+    return renderWithProviders(<LastEditInfoLabel item={testItem} />, {
+      reducers: {
+        currentUser: userReducer,
+      },
+    });
   }
 
   const A_FEW_SECONDS_AGO = moment().add(5, "seconds");
@@ -75,7 +68,7 @@ describe("LastEditInfoLabel", () => {
     it(`should display "${expectedTimestamp}" timestamp correctly`, () => {
       mockDate.set(date.toDate(), 0);
       const { getByTestId } = setup();
-      expect(getByTestId("label")).toHaveTextContent(
+      expect(getByTestId("revision-history-button")).toHaveTextContent(
         new RegExp(`Edited ${expectedTimestamp} by .*`, "i"),
       );
     });
@@ -87,14 +80,14 @@ describe("LastEditInfoLabel", () => {
     const expectedName = `${first_name} ${last_name.charAt(0)}.`;
 
     const { getByTestId } = setup();
-    expect(getByTestId("label")).toHaveTextContent(
+    expect(getByTestId("revision-history-button")).toHaveTextContent(
       new RegExp(`Edited .* by ${expectedName}`),
     );
   });
 
   it("should display if user is the last editor", () => {
     const { getByTestId } = setup({ isLastEditedByCurrentUser: true });
-    expect(getByTestId("label")).toHaveTextContent(
+    expect(getByTestId("revision-history-button")).toHaveTextContent(
       new RegExp(`Edited .* by you`),
     );
   });

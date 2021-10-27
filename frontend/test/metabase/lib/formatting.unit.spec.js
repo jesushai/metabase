@@ -2,16 +2,43 @@ import { isElementOfType } from "react-dom/test-utils";
 import moment from "moment-timezone";
 
 import {
+  capitalize,
   formatNumber,
   formatValue,
   formatUrl,
   formatDateTimeWithUnit,
+  formatTimeWithUnit,
   slugify,
 } from "metabase/lib/formatting";
 import ExternalLink from "metabase/components/ExternalLink";
 import { TYPE } from "metabase/lib/types";
 
 describe("formatting", () => {
+  describe("capitalize", () => {
+    it("capitalizes a single word", () => {
+      expect(capitalize("hello")).toBe("Hello");
+    });
+
+    it("capitalizes only the first char of a string", () => {
+      expect(capitalize("hello world")).toBe("Hello world");
+    });
+
+    it("converts a string to lowercase by default", () => {
+      expect(capitalize("heLLo")).toBe("Hello");
+    });
+
+    it("doesn't lowercase the string if option provided", () => {
+      expect(capitalize("hellO WoRlD", { lowercase: false })).toBe(
+        "HellO WoRlD",
+      );
+    });
+
+    it("doesn't break on an empty string", () => {
+      expect(capitalize("")).toBe("");
+      expect(capitalize("", { lowercase: false })).toBe("");
+    });
+  });
+
   describe("formatNumber", () => {
     it("should format 0 correctly", () => {
       expect(formatNumber(0)).toEqual("0");
@@ -223,6 +250,21 @@ describe("formatting", () => {
       // but it's formatted as a link
       expect(formatted.props.className).toEqual("link link--wrappable");
     });
+    it("should render image with a click behavior in jsx + rich mode (metabase#17161)", () => {
+      const formatted = formatValue("http://metabase.com/logo.png", {
+        jsx: true,
+        rich: true,
+        view_as: "image",
+        click_behavior: {
+          linkTemplate: "foo",
+          linkType: "url",
+          type: "link",
+        },
+        clicked: {},
+      });
+      expect(formatted.type).toEqual("img");
+      expect(formatted.props.src).toEqual("http://metabase.com/logo.png");
+    });
     it("should return a component for email addresses in jsx + rich mode", () => {
       expect(
         isElementOfType(
@@ -265,6 +307,19 @@ describe("formatting", () => {
           },
         }),
       ).toEqual("00:00");
+    });
+    it("should not include time for type/Date type (metabase#7494)", () => {
+      expect(
+        formatValue("2019-07-07T00:00:00.000Z", {
+          date_style: "M/D/YYYY",
+          time_enabled: "minutes",
+          time_style: "HH:mm",
+          column: {
+            base_type: "type/Date",
+            unit: "hour-of-day",
+          },
+        }),
+      ).toEqual("7/7/2019");
     });
   });
 
@@ -448,8 +503,63 @@ describe("formatting", () => {
         ).toEqual("julio 7, 2019 – julio 13, 2019");
       } finally {
         // globally reset locale
-        moment.locale(false);
+        moment.locale("en");
       }
+    });
+
+    it("should format days of week with default options", () => {
+      expect(formatDateTimeWithUnit("mon", "day-of-week")).toEqual("Monday");
+    });
+
+    it("should format days of week with compact option", () => {
+      const options = {
+        compact: true,
+      };
+
+      expect(formatDateTimeWithUnit("sun", "day-of-week", options)).toEqual(
+        "Sun",
+      );
+    });
+  });
+
+  describe("formatTimeWithUnit", () => {
+    it("should format hour-of day with default options", () => {
+      expect(formatTimeWithUnit(8, "hour-of-day")).toEqual("8:00 AM");
+    });
+
+    it("should format hour-of-day with 12 hour clock", () => {
+      const options = {
+        time_style: "h:mm A",
+      };
+
+      expect(formatTimeWithUnit(14, "hour-of-day", options)).toEqual("2:00 PM");
+    });
+
+    it("should format hour-of-day with 24 hour clock", () => {
+      const options = {
+        time_style: "HH:mm",
+      };
+
+      expect(formatTimeWithUnit(14, "hour-of-day", options)).toEqual("14:00");
+    });
+
+    it("should format hour-of-day with custom precision", () => {
+      const options = {
+        time_style: "HH:mm",
+        time_enabled: "seconds",
+      };
+
+      expect(formatTimeWithUnit(14.4, "hour-of-day", options)).toEqual(
+        "14:00:00",
+      );
+    });
+
+    it("should format hour-of-day with a custom format", () => {
+      const options = {
+        time_format: "HH",
+      };
+
+      expect(formatTimeWithUnit(14.4, "hour-of-day", options)).toEqual("14");
     });
   });
 

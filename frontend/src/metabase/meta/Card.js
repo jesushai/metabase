@@ -1,14 +1,16 @@
+import { getTemplateTagParameters } from "metabase/meta/Parameter";
+import { parameterToMBQLFilter } from "metabase/parameters/utils/mbql";
+import { getParameterTargetField } from "metabase/parameters/utils/targets";
 import {
-  getTemplateTagParameters,
-  getParameterTargetFieldId,
-  parameterToMBQLFilter,
   normalizeParameterValue,
-} from "metabase/meta/Parameter";
+  getValuePopulatedParameters,
+} from "metabase/parameters/utils/parameter-values";
 
 import * as Query from "metabase/lib/query/query";
 import * as Q_DEPRECATED from "metabase/lib/query"; // legacy
 import Utils from "metabase/lib/utils";
 import * as Urls from "metabase/lib/urls";
+import Question from "metabase-lib/lib/Question";
 
 import _ from "underscore";
 import { assoc, updateIn } from "icepick";
@@ -125,7 +127,7 @@ export function getTemplateTagsForParameters(card: ?Card): Array<TemplateTag> {
   );
 }
 
-export function getParameters(card: ?Card): Parameter[] {
+export function getParametersFromCard(card: ?Card): Parameter[] {
   if (card && card.parameters) {
     return card.parameters;
   }
@@ -134,24 +136,26 @@ export function getParameters(card: ?Card): Parameter[] {
   return getTemplateTagParameters(tags);
 }
 
-export function getParametersWithExtras(
+export function getValueAndFieldIdPopulatedParametersFromCard(
   card: Card,
+  metadata,
   parameterValues?: ParameterValues,
 ): Parameter[] {
-  return getParameters(card).map(parameter => {
-    // if we have a parameter value for this parameter, set "value"
-    if (parameterValues && parameter.id in parameterValues) {
-      parameter = assoc(parameter, "value", parameterValues[parameter.id]);
-    }
+  const parameters = getParametersFromCard(card);
+  const valuePopulatedParameters = getValuePopulatedParameters(
+    parameters,
+    parameterValues,
+  );
+  const question = new Question(card, metadata);
+
+  return valuePopulatedParameters.map(parameter => {
     // if we have a field id for this parameter, set "field_id"
-    const fieldId = getParameterTargetFieldId(
-      parameter.target,
-      card.dataset_query,
-    );
-    if (fieldId != null) {
-      parameter = assoc(parameter, "field_id", fieldId);
+    const field = getParameterTargetField(parameter.target, metadata, question);
+    if (field != null) {
+      parameter = assoc(parameter, "fields", [field]);
+      parameter = assoc(parameter, "field_id", field.id);
     }
-    parameter = assoc(parameter, "hasOnlyFieldTargets", fieldId != null);
+    parameter = assoc(parameter, "hasOnlyFieldTargets", field != null);
     return parameter;
   });
 }
@@ -232,7 +236,7 @@ export function questionUrlWithParameters(
 
   card = Utils.copy(card);
 
-  const cardParameters = getParameters(card);
+  const cardParameters = getParametersFromCard(card);
   const datasetQuery = applyParameters(
     card,
     parameters,

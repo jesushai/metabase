@@ -3,6 +3,7 @@ import {
   SAMPLE_DATASET,
   ORDERS,
   PRODUCTS,
+  createMetadata,
 } from "__support__/sample_dataset_fixture";
 
 import { assoc, dissoc } from "icepick";
@@ -297,6 +298,30 @@ describe("Question", () => {
         expect(question.display()).toBe("scalar");
       });
     });
+
+    describe("maybeUnlockDisplay", () => {
+      it("should keep display locked when it was locked with unsensible display", () => {
+        const sensibleDisplays = ["table", "scalar"];
+        const previousSensibleDisplays = sensibleDisplays;
+        const question = new Question(orders_count_card, metadata)
+          .setDisplay("funnel")
+          .lockDisplay()
+          .maybeUnlockDisplay(sensibleDisplays, previousSensibleDisplays);
+
+        expect(question.displayIsLocked()).toBe(true);
+      });
+
+      it("should unlock display it was locked with sensible display which has become unsensible", () => {
+        const previousSensibleDisplays = ["funnel"];
+        const sensibleDisplays = ["table", "scalar"];
+        const question = new Question(orders_count_card, metadata)
+          .setDisplay("funnel")
+          .lockDisplay()
+          .maybeUnlockDisplay(sensibleDisplays, previousSensibleDisplays);
+
+        expect(question.displayIsLocked()).toBe(false);
+      });
+    });
   });
 
   // TODO: These are mode-dependent and should probably be tied to modes
@@ -328,7 +353,7 @@ describe("Question", () => {
       });
     });
 
-    describe("aggregate(...)", async () => {
+    describe("aggregate(...)", () => {
       const question = new Question(orders_raw_card, metadata);
       it("returns the correct query for a summarization of a raw data table", () => {
         const summarizedQuestion = question.aggregate(["count"]);
@@ -340,7 +365,7 @@ describe("Question", () => {
       });
     });
 
-    describe("breakout(...)", async () => {
+    describe("breakout(...)", () => {
       it("works with a datetime field reference", () => {
         const ordersCountQuestion = new Question(orders_count_card, metadata);
         const brokenOutCard = ordersCountQuestion.breakout([
@@ -393,7 +418,7 @@ describe("Question", () => {
       });
     });
 
-    describe("pivot(...)", async () => {
+    describe("pivot(...)", () => {
       const ordersCountQuestion = new Question(orders_count_card, metadata);
       it("works with a datetime dimension ", () => {
         const pivoted = ordersCountQuestion.pivot([
@@ -441,7 +466,7 @@ describe("Question", () => {
       });
     });
 
-    describe("filter(...)", async () => {
+    describe("filter(...)", () => {
       const questionForFiltering = new Question(orders_raw_card, metadata);
 
       it("works with an id filter", () => {
@@ -503,7 +528,7 @@ describe("Question", () => {
       });
     });
 
-    describe("drillUnderlyingRecords(...)", async () => {
+    describe("drillUnderlyingRecords(...)", () => {
       const ordersCountQuestion = new Question(
         orders_count_by_id_card,
         metadata,
@@ -529,7 +554,7 @@ describe("Question", () => {
       });
     });
 
-    describe("toUnderlyingRecords(...)", async () => {
+    describe("toUnderlyingRecords(...)", () => {
       const question = new Question(orders_raw_card, metadata);
       const ordersCountQuestion = new Question(orders_count_card, metadata);
 
@@ -563,7 +588,7 @@ describe("Question", () => {
       });
     });
 
-    describe("toUnderlyingData()", async () => {
+    describe("toUnderlyingData()", () => {
       const ordersCountQuestion = new Question(orders_count_card, metadata);
 
       it("returns underlying data correctly for table query", () => {
@@ -582,7 +607,7 @@ describe("Question", () => {
       });
     });
 
-    describe("drillPK(...)", async () => {
+    describe("drillPK(...)", () => {
       const question = new Question(orders_raw_card, metadata);
       it("returns the correct query for a PK detail drill-through", () => {
         const drilledQuestion = question.drillPK(ORDERS.ID, 1);
@@ -599,14 +624,70 @@ describe("Question", () => {
           },
         });
       });
-    });
-  });
 
-  describe("QUESTION EXECUTION", () => {
-    describe("getResults()", () => {
-      it("executes correctly a native query with field filter parameters", () => {
-        pending();
-        // test also here a combo of parameter with a value + parameter without a value + parameter with a default value
+      describe("with composite PK", () => {
+        // Making TOTAL a PK column in addition to ID
+        const metadata = createMetadata(state =>
+          state.assocIn(
+            ["entities", "fields", ORDERS.TOTAL.id, "semantic_type"],
+            "type/PK",
+          ),
+        );
+        let question;
+
+        beforeEach(() => {
+          question = new Question(orders_raw_card, metadata);
+        });
+
+        it("when drills to one column of a composite key returns equals filter by the column", () => {
+          const drilledQuestion = question.drillPK(ORDERS.ID, 1);
+
+          expect(drilledQuestion.canRun()).toBe(true);
+          expect(drilledQuestion._card.dataset_query).toEqual({
+            type: "query",
+            database: SAMPLE_DATASET.id,
+            query: {
+              "source-table": ORDERS.id,
+              filter: ["=", ["field", ORDERS.ID.id, null], 1],
+            },
+          });
+        });
+
+        it("when drills to both columns of a composite key returns query with equality filter by both PKs", () => {
+          const drilledQuestion = question
+            .drillPK(ORDERS.ID, 1)
+            .drillPK(ORDERS.TOTAL, 1);
+
+          expect(drilledQuestion.canRun()).toBe(true);
+          expect(drilledQuestion._card.dataset_query).toEqual({
+            type: "query",
+            database: SAMPLE_DATASET.id,
+            query: {
+              "source-table": ORDERS.id,
+              filter: [
+                "and",
+                ["=", ["field", ORDERS.TOTAL.id, null], 1],
+                ["=", ["field", ORDERS.ID.id, null], 1],
+              ],
+            },
+          });
+        });
+
+        it("when drills to other table PK removes the previous table PK filters", () => {
+          const drilledQuestion = question
+            .drillPK(ORDERS.ID, 1)
+            .drillPK(PRODUCTS.ID, 1);
+
+          expect(drilledQuestion.canRun()).toBe(true);
+          expect(drilledQuestion._card.dataset_query).toEqual({
+            type: "query",
+            database: SAMPLE_DATASET.id,
+            query: {
+              "source-table": PRODUCTS.id,
+              filter: ["=", ["field", PRODUCTS.ID.id, null], 1],
+            },
+          });
+        });
       });
     });
   });
@@ -643,6 +724,200 @@ describe("Question", () => {
           "/question#eyJkYXRhc2V0X3F1ZXJ5Ijp7ImRhdGFiYXNlIjoxLCJxdWVyeSI6eyJzb3VyY2UtdGFibGUiOjF9LCJ0eXBlIjoicXVlcnkifSwiZGlzcGxheSI6InRhYmxlIiwibmFtZSI6IlJhdyBvcmRlcnMgZGF0YSIsInZpc3VhbGl6YXRpb25fc2V0dGluZ3MiOnt9fQ==",
         );
       });
+    });
+  });
+
+  describe("Question.prototype._syncNativeQuerySettings", () => {
+    let question;
+    const cols = [
+      {
+        display_name: "num",
+        source: "native",
+        field_ref: [
+          "field",
+          "num",
+          {
+            "base-type": "type/Float",
+          },
+        ],
+        name: "num",
+        base_type: "type/Float",
+      },
+      {
+        display_name: "text",
+        source: "native",
+        field_ref: [
+          "field",
+          "text",
+          {
+            "base-type": "type/Text",
+          },
+        ],
+        name: "text",
+        base_type: "type/Text",
+      },
+    ];
+
+    const vizSettingCols = [
+      {
+        name: "num",
+        fieldRef: ["field", "num", { "base-type": "type/Float" }],
+        enabled: true,
+      },
+      {
+        name: "text",
+        fieldRef: ["field", "text", { "base-type": "type/Text" }],
+        enabled: true,
+      },
+    ];
+
+    beforeEach(() => {
+      question = new Question(native_orders_count_card, metadata);
+      question.setting = jest.fn();
+      question.updateSettings = jest.fn();
+    });
+
+    describe("when columns have not been defined", () => {
+      it("should do nothing when given no cols", () => {
+        question._syncNativeQuerySettings({});
+        question._syncNativeQuerySettings({ data: { cols: [] } });
+        question._syncNativeQuerySettings({ data: { cols } });
+
+        expect(question.updateSettings).not.toHaveBeenCalled();
+      });
+
+      it("should do nothing when given cols", () => {
+        question._syncNativeQuerySettings({ data: { cols } });
+
+        expect(question.updateSettings).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("after vizSetting columns have been defined", () => {
+      beforeEach(() => {
+        question.setting.mockImplementation(property => {
+          if (property === "table.columns") {
+            return vizSettingCols;
+          }
+        });
+      });
+
+      it("should handle the addition and removal of columns", () => {
+        question._syncNativeQuerySettings({
+          data: {
+            cols: [
+              ...cols.slice(1),
+              {
+                display_name: "foo",
+                source: "native",
+                field_ref: [
+                  "field",
+                  "foo",
+                  {
+                    "base-type": "type/Float",
+                  },
+                ],
+                name: "foo",
+                base_type: "type/Float",
+              },
+            ],
+          },
+        });
+
+        expect(question.updateSettings).toHaveBeenCalledWith({
+          "table.columns": [
+            ...vizSettingCols.slice(1),
+            {
+              name: "foo",
+              fieldRef: [
+                "field",
+                "foo",
+                {
+                  "base-type": "type/Float",
+                },
+              ],
+              enabled: true,
+            },
+          ],
+        });
+      });
+
+      it("should handle the mutation of extraneous column props", () => {
+        question._syncNativeQuerySettings({
+          data: {
+            cols: [
+              {
+                display_name: "num with mutated display_name",
+                source: "native",
+                field_ref: [
+                  "field",
+                  "num",
+                  {
+                    "base-type": "type/Float",
+                  },
+                ],
+                name: "foo",
+                base_type: "type/Float",
+              },
+              ...cols.slice(1),
+            ],
+          },
+        });
+
+        expect(question.updateSettings).not.toHaveBeenCalled();
+      });
+
+      it("should handle the mutation of a field_ref on an existing column", () => {
+        question._syncNativeQuerySettings({
+          data: {
+            cols: [
+              {
+                display_name: "foo",
+                source: "native",
+                field_ref: [
+                  "field",
+                  "foo",
+                  {
+                    "base-type": "type/Integer",
+                  },
+                ],
+                name: "foo",
+                base_type: "type/Integer",
+              },
+              ...cols.slice(1),
+            ],
+          },
+        });
+
+        expect(question.updateSettings).toHaveBeenCalledWith({
+          "table.columns": [
+            ...vizSettingCols.slice(1),
+            {
+              name: "foo",
+              fieldRef: ["field", "foo", { "base-type": "type/Integer" }],
+              enabled: true,
+            },
+          ],
+        });
+      });
+    });
+  });
+
+  describe("Question.prototype.getResultMetadata", () => {
+    it("shoud return the `result_metadata` property off the underlying card", () => {
+      const question = new Question(
+        { ...card, result_metadata: [1, 2, 3] },
+        metadata,
+      );
+      expect(question.getResultMetadata()).toEqual([1, 2, 3]);
+    });
+
+    it("should default to an array", () => {
+      const question = new Question(
+        { ...card, result_metadata: null },
+        metadata,
+      );
+      expect(question.getResultMetadata()).toEqual([]);
     });
   });
 });

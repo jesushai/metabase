@@ -93,7 +93,6 @@ type Props = {
   formatOptions?: FormattingOptions,
   maxWidth?: number,
   minWidth?: number,
-  optionsMaxHeight?: Number,
   alwaysShowOptions?: boolean,
   disableSearch?: boolean,
 
@@ -234,9 +233,16 @@ export class FieldValuesWidget extends Component {
   }
 
   shouldList() {
+    // Virtual fields come from questions that are based on other questions.
+    // Currently, the back end does not return `has_field_values` in their metadata,
+    // so we ignore them for now.
+    const nonVirtualFields = this.props.fields.filter(
+      field => typeof field.id === "number",
+    );
+
     return (
       !this.props.disableSearch &&
-      this.props.fields.every(field => field.has_field_values === "list")
+      nonVirtualFields.every(field => field.has_field_values === "list")
     );
   }
 
@@ -399,6 +405,7 @@ export class FieldValuesWidget extends Component {
     optionsList,
     isFocused,
     isAllSelected,
+    isFiltered,
   }: LayoutRendererProps) {
     const { alwaysShowOptions, fields } = this.props;
     const { loadingState } = this.state;
@@ -412,7 +419,7 @@ export class FieldValuesWidget extends Component {
       } else if (this.isSearchable()) {
         if (loadingState === "LOADING") {
           return <LoadingState />;
-        } else if (loadingState === "LOADED") {
+        } else if (loadingState === "LOADED" && isFiltered) {
           return <NoMatchState fields={fields.map(this.searchField)} />;
         }
       }
@@ -443,7 +450,7 @@ export class FieldValuesWidget extends Component {
       color,
       className,
       style,
-      optionsMaxHeight,
+      parameter,
     } = this.props;
     const { loadingState } = this.state;
 
@@ -479,14 +486,10 @@ export class FieldValuesWidget extends Component {
           multi={multi}
           autoFocus={autoFocus}
           color={color}
-          style={style}
+          style={{ ...style, minWidth: "inherit" }}
           className={className}
           parameter={this.props.parameter}
-          optionsStyle={
-            optionsMaxHeight !== undefined
-              ? { maxHeight: optionsMaxHeight }
-              : {}
-          }
+          optionsStyle={!parameter ? { maxHeight: "none" } : {}}
           // end forwarded props
           options={options}
           valueKey={0}
